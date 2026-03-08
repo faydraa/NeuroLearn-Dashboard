@@ -130,37 +130,7 @@ export default function App() {
       }
     };
 
-    const loadSession = async () => {
-      try {
-        setLoading(true);
-
-        const { data, error } = await supabase.auth.getSession();
-
-        if (error) {
-          console.error("Session error:", error.message);
-          setCurrentUser(null);
-          setCalendarEvents([]);
-          return;
-        }
-
-        const session = data.session;
-
-        if (session?.user) {
-          await fetchUserProfile(session.user);
-        } else {
-          setCurrentUser(null);
-          setCalendarEvents([]);
-        }
-      } catch (err) {
-        console.error("Unexpected session load error:", err);
-        setCurrentUser(null);
-        setCalendarEvents([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadSession();
+    setLoading(false);
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setTimeout(async () => {
@@ -218,6 +188,7 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await logoutUser();
+      setCurrentUser(null);
       setCurrentPage("dashboard");
       setStudyPlan(null);
       setCalendarEvents([]);

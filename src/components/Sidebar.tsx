@@ -1,13 +1,4 @@
-import { 
-  LayoutDashboard, 
-  Brain, 
-  Calendar as CalendarIcon, 
-  TrendingUp, 
-  Gamepad2,
-  LogOut,
-  User,
-  Settings as SettingsIcon
-} from 'lucide-react';
+import { LayoutDashboard, Brain, Calendar as CalendarIcon, TrendingUp, Gamepad2, LogOut, User, Settings as SettingsIcon } from 'lucide-react';
 import type { User as UserType } from '../App';
 
 type SidebarProps = {
