@@ -46,7 +46,7 @@ export function ProgressTracking({ userName }: ProgressTrackingProps) {
   const currentMonth = useMemo(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
-  }, [todayStr]); // re-evaluates when day changes (enough for month rollover)
+  }, []); // re-evaluates when day changes (enough for month rollover)
 
   const currentMonthLabel = useMemo(() => {
     return currentMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Brain, Activity, AlertTriangle } from "lucide-react";
 import type { StudyPlan } from "../App";
 import { MuseClient } from "muse-js";
@@ -20,6 +20,12 @@ export type RawEEGSample = {
 
 type RecordingStage = "eyesClosed" | "studying";
 
+const EYES_CLOSED_DURATION = 60;
+const STUDYING_DURATION = 10 * 60;
+const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
+const MAX_POINTS = 512;
+const ANALYSIS_DURATION_MS = 15000;
+
 function formatMMSS(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
   const mm = String(Math.floor(s / 60)).padStart(2, "0");
@@ -27,7 +33,7 @@ function formatMMSS(totalSeconds: number) {
   return `${mm}:${ss}`;
 }
 
-// ✅ helper: add today's planned minutes (sum of all plans generated today)
+// add today's planned minutes
 function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   const today = new Date().toISOString().split("T")[0];
   const existing = localStorage.getItem("studyProgress");
@@ -36,17 +42,17 @@ function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   if (!progress[today]) {
     progress[today] = { completedMinutes: 0, plannedMinutes: 0, sessions: 0, avgFocus: 0 };
   } else {
-    // backwards compatibility: if old keys exist, migrate
     if (progress[today].completedMinutes == null) progress[today].completedMinutes = progress[today].duration ?? 0;
     if (progress[today].plannedMinutes == null) progress[today].plannedMinutes = 0;
     if (progress[today].sessions == null) progress[today].sessions = 0;
-    if (progress[today].avgFocus == null) progress[today].avgFocus = progress[today].avgFocus ?? 0;
+    if (progress[today].avgFocus == null) progress[today].avgFocus = 0;
   }
 
   progress[today].plannedMinutes += plannedMinutesToAdd;
 
-  // optional: keep old key "duration" updated so older UI doesn't break
-  if (progress[today].duration == null) progress[today].duration = progress[today].completedMinutes;
+  if (progress[today].duration == null) {
+    progress[today].duration = progress[today].completedMinutes;
+  }
 
   localStorage.setItem("studyProgress", JSON.stringify(progress));
 }
@@ -65,8 +71,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const [elapsedSec, setElapsedSec] = useState(0);
 
   const [waveformData, setWaveformData] = useState<RawEEGSample[]>([]);
-  const [eegSub, setEegSub] = useState<SubscriptionLike | null>(null);
 
+  const eegSubRef = useRef<SubscriptionLike | null>(null);
   const latestRef = useRef<{ tp9?: number; af7?: number; af8?: number; tp10?: number }>({});
   const isRecordingRef = useRef(false);
 
@@ -77,35 +83,32 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const startTimeRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
 
-  // NOTE: you currently have these set for testing
-  const EYES_CLOSED_DURATION = 60;
-  const STUDYING_DURATION = 10 * 60;
-  const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
-
-  const MAX_POINTS = 512;
-
-  const ANALYSIS_DURATION_MS = 15000;
-
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
 
   useEffect(() => {
     return () => {
-      eegSub?.unsubscribe();
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+      eegSubRef.current?.unsubscribe();
+
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+      }
+
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const flushToState = () => {
+  const flushToState = useCallback(() => {
     rafIdRef.current = null;
 
     if (!isRecordingRef.current) {
       bufferRef.current = [];
       return;
     }
+
     if (bufferRef.current.length === 0) return;
 
     const toAdd = bufferRef.current;
@@ -113,10 +116,12 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
     setWaveformData((prev) => {
       const updated = [...prev, ...toAdd];
-      if (updated.length > MAX_POINTS) updated.splice(0, updated.length - MAX_POINTS);
+      if (updated.length > MAX_POINTS) {
+        updated.splice(0, updated.length - MAX_POINTS);
+      }
       return updated;
     });
-  };
+  }, []);
 
   const connectMuseWeb = async () => {
     if (!("bluetooth" in navigator)) {
@@ -125,6 +130,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     }
 
     setIsConnecting(true);
+
     try {
       const client = new MuseClient();
       await client.connect();
@@ -160,8 +166,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         }
       });
 
-      eegSub?.unsubscribe();
-      setEegSub(sub);
+      eegSubRef.current?.unsubscribe();
+      eegSubRef.current = sub;
 
       setMuseConnected(true);
       alert("Muse connected! You can now start recording.");
@@ -184,7 +190,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     setStageBanner("Close your eyes and relax for 1 minute.");
     window.setTimeout(() => setStageBanner(null), 5000);
 
-    if (timerRef.current) window.clearInterval(timerRef.current);
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+    }
 
     timerRef.current = window.setInterval(() => {
       const elapsed = (Date.now() - (startTimeRef.current ?? Date.now())) / 1000;
@@ -205,29 +213,23 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         setStageBanner(null);
         setIsRecording(false);
         setIsAnalyzing(true);
-        if (timerRef.current) window.clearInterval(timerRef.current);
+
+        if (timerRef.current) {
+          window.clearInterval(timerRef.current);
+        }
         timerRef.current = null;
       }
     }, 200);
 
     return () => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+      }
       timerRef.current = null;
     };
   }, [isRecording]);
 
-  useEffect(() => {
-    if (!isAnalyzing) return;
-
-    const t = window.setTimeout(() => {
-      generateStudyPlan();
-    }, ANALYSIS_DURATION_MS);
-
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAnalyzing]);
-
-  const generateStudyPlan = () => {
+  const generateStudyPlan = useCallback(() => {
     const totalDuration = 120;
 
     const breaks = [
@@ -242,11 +244,19 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       generatedAt: new Date(),
     };
 
-    // ✅ Add today's goal (accumulate across multiple sessions in one day)
     addPlannedMinutesForToday(totalDuration);
-
     onComplete(plan);
-  };
+  }, [onComplete]);
+
+  useEffect(() => {
+    if (!isAnalyzing) return;
+
+    const t = window.setTimeout(() => {
+      generateStudyPlan();
+    }, ANALYSIS_DURATION_MS);
+
+    return () => window.clearTimeout(t);
+  }, [isAnalyzing, generateStudyPlan]);
 
   const startRecording = () => {
     if (!museConnected) {
@@ -264,7 +274,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
   const totalRemaining = RECORDING_DURATION - elapsedSec;
   const stageRemaining =
-    recordingStage === "eyesClosed" ? EYES_CLOSED_DURATION - elapsedSec : RECORDING_DURATION - elapsedSec;
+    recordingStage === "eyesClosed"
+      ? EYES_CLOSED_DURATION - elapsedSec
+      : RECORDING_DURATION - elapsedSec;
 
   return (
     <div className="max-w-4xl mx-auto p-8">

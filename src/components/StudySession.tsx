@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Pause, Square, Coffee, Brain, AlertCircle, Apple } from 'lucide-react';
 import type { StudyPlan } from '../App';
 
@@ -13,11 +13,16 @@ type Notification = {
 };
 
 export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
-  const [timeElapsed, setTimeElapsed] = useState(0); // in seconds
+  const [timeElapsed, setTimeElapsed] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [notification, setNotification] = useState<Notification | null>(null);
-  const [focusLevel, setFocusLevel] = useState(75); // Simulated focus level
+  const [focusLevel, setFocusLevel] = useState(75);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const focusLevelRef = useRef(focusLevel);
+
+  useEffect(() => {
+    focusLevelRef.current = focusLevel;
+  }, [focusLevel]);
 
   useEffect(() => {
     audioRef.current = new Audio(
@@ -25,31 +30,31 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
     );
   }, []);
 
-  const showNotification = (notif: Notification) => {
+  const showNotification = useCallback((notif: Notification) => {
     setNotification(notif);
     setTimeout(() => setNotification(null), 10000);
-  };
+  }, []);
 
-  const playSound = () => {
+  const playSound = useCallback(() => {
     const a = audioRef.current;
     if (!a) return;
+
     try {
       a.currentTime = 0;
       a.play().catch(() => {});
     } catch {
       // ignore
     }
-  };
+  }, []);
 
-  // ✅ save completed minutes (accumulate across multiple sessions in a day)
-  const saveProgress = (totalSeconds: number) => {
+  const saveProgress = useCallback((totalSeconds: number) => {
     const today = new Date().toISOString().split('T')[0];
     const existing = localStorage.getItem('studyProgress');
     const progress = existing ? JSON.parse(existing) : {};
 
     const minutesThisSession = totalSeconds / 60;
+    const currentFocus = focusLevelRef.current;
 
-    // Backwards compatible init
     if (!progress[today]) {
       progress[today] = { completedMinutes: 0, plannedMinutes: 0, sessions: 0, avgFocus: 0, focusMinutes: 0 };
     } else {
@@ -57,34 +62,34 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
       if (progress[today].plannedMinutes == null) progress[today].plannedMinutes = 0;
       if (progress[today].sessions == null) progress[today].sessions = 0;
       if (progress[today].avgFocus == null) progress[today].avgFocus = 0;
-      if (progress[today].focusMinutes == null) progress[today].focusMinutes = 0; // for weighted avg
+      if (progress[today].focusMinutes == null) progress[today].focusMinutes = 0;
     }
 
-    // ✅ accumulate completed time + sessions
     progress[today].completedMinutes += minutesThisSession;
     progress[today].sessions += 1;
 
-    // ✅ weighted average focus across sessions (by minutes)
     const prevFocusMinutes = progress[today].focusMinutes || 0;
     const prevAvg = progress[today].avgFocus || 0;
     const newFocusMinutes = prevFocusMinutes + minutesThisSession;
-    const weighted = newFocusMinutes > 0
-      ? ((prevAvg * prevFocusMinutes) + (focusLevel * minutesThisSession)) / newFocusMinutes
-      : focusLevel;
+
+    const weighted =
+      newFocusMinutes > 0
+        ? ((prevAvg * prevFocusMinutes) + (currentFocus * minutesThisSession)) / newFocusMinutes
+        : currentFocus;
 
     progress[today].avgFocus = weighted;
     progress[today].focusMinutes = newFocusMinutes;
-
-    // optional: keep old key for older UI
     progress[today].duration = progress[today].completedMinutes;
 
     localStorage.setItem('studyProgress', JSON.stringify(progress));
-  };
+  }, []);
 
-  const breaksWithMeditation = [
-    ...studyPlan.breaks,
-    { time: 70, duration: 3, type: 'Meditation break' },
-  ].sort((a, b) => a.time - b.time);
+  const breaksWithMeditation = useMemo(() => {
+    return [
+      ...studyPlan.breaks,
+      { time: 70, duration: 3, type: 'Meditation break' },
+    ].sort((a, b) => a.time - b.time);
+  }, [studyPlan.breaks]);
 
   const getBreakIcon = (breakType: string) => {
     const t = breakType.toLowerCase();
@@ -114,6 +119,7 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
         if (newTime % 120 === 0 && Math.random() < 0.3) {
           const randomFocus = 30 + Math.random() * 30;
           setFocusLevel(randomFocus);
+
           if (randomFocus < 50) {
             showNotification({
               type: 'distraction',
@@ -128,6 +134,7 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
         if (newTime >= studyPlan.totalDuration * 60) {
           setIsRunning(false);
           saveProgress(newTime);
+
           setTimeout(() => {
             onComplete();
           }, 1000);
@@ -138,13 +145,16 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isRunning, breaksWithMeditation, studyPlan.totalDuration, onComplete]);
+  }, [isRunning, breaksWithMeditation, studyPlan.totalDuration, onComplete, saveProgress, showNotification, playSound]);
 
   const formatTime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs
+      .toString()
+      .padStart(2, '0')}`;
   };
 
   const totalSeconds = studyPlan.totalDuration * 60;
@@ -282,7 +292,6 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
               })}
             </div>
           </div>
-
         </div>
       </div>
     </div>
