@@ -5,18 +5,24 @@ import type { User, StudyPlan } from '../App';
 type DashboardProps = {
   user: User;
   onStartRecording: () => void;
-  studyPlan: StudyPlan | null; // can keep (you may use elsewhere later)
+  studyPlan: StudyPlan | null;
 };
 
 type TodayProgress = {
   completedMinutes: number;
   plannedMinutes: number;
   sessions: number;
-  avgFocus: number; // %
+  avgFocus: number;
 };
 
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps) {
-  const [greeting, setGreeting] = useState('');
   const [todayProgress, setTodayProgress] = useState<TodayProgress>({
     completedMinutes: 0,
     plannedMinutes: 0,
@@ -25,13 +31,7 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
   });
 
   const todayKey = useMemo(() => new Date().toISOString().split('T')[0], []);
-
-  useEffect(() => {
-    const hour = new Date().getHours();
-    if (hour < 12) setGreeting('Good morning');
-    else if (hour < 18) setGreeting('Good afternoon');
-    else setGreeting('Good evening');
-  }, []);
+  const greeting = getGreeting();
 
   useEffect(() => {
     try {
@@ -40,7 +40,6 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
       const today = progress[todayKey];
 
       if (today) {
-        // backwards compatible: migrate old keys
         const completed = today.completedMinutes ?? today.duration ?? 0;
         const planned = today.plannedMinutes ?? 0;
 
@@ -51,10 +50,20 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
           avgFocus: Math.round(today.avgFocus || 0),
         });
       } else {
-        setTodayProgress({ completedMinutes: 0, plannedMinutes: 0, sessions: 0, avgFocus: 0 });
+        setTodayProgress({
+          completedMinutes: 0,
+          plannedMinutes: 0,
+          sessions: 0,
+          avgFocus: 0,
+        });
       }
     } catch {
-      setTodayProgress({ completedMinutes: 0, plannedMinutes: 0, sessions: 0, avgFocus: 0 });
+      setTodayProgress({
+        completedMinutes: 0,
+        plannedMinutes: 0,
+        sessions: 0,
+        avgFocus: 0,
+      });
     }
   }, [todayKey]);
 
@@ -70,7 +79,7 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
 
   return (
     <div className="max-w-7xl mx-auto p-8">
-      <div className="mb-8">
+      <div className="mb-8 min-h-[72px]">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           {greeting}, {user.name}! 👋🏻
         </h1>
@@ -105,7 +114,6 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
         </div>
       </div>
 
-      {/* Today’s Progress */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -134,9 +142,7 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
 
         <div>
           <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-gray-600">
-              Daily progress (sum of today’s plans)
-            </span>
+            <span className="text-gray-600">Daily progress (sum of today’s plans)</span>
             <span className="font-medium text-gray-900">{Math.round(progressPercent)}%</span>
           </div>
 
@@ -154,8 +160,6 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
           </p>
         </div>
       </div>
-
-      {/* ✅ Removed: Today's Study Plan card */}
 
       <div className="grid md:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
