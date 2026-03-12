@@ -130,29 +130,52 @@ export default function App() {
       }
     };
 
-    setLoading(false);
+    const initializeAuth = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setTimeout(async () => {
-        try {
-          if (session?.user) {
-            await fetchUserProfile(session.user);
-          } else {
-            setCurrentUser(null);
-            setCalendarEvents([]);
-            setCurrentPage("dashboard");
-            setStudyPlan(null);
-          }
-        } catch (err) {
-          console.error("Auth state change error:", err);
+        if (session?.user) {
+          await fetchUserProfile(session.user);
+        } else {
           setCurrentUser(null);
           setCalendarEvents([]);
         }
-      }, 0);
+      } catch (err) {
+        console.error("Initial session fetch error:", err);
+        setCurrentUser(null);
+        setCalendarEvents([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      try {
+        if (session?.user) {
+          await fetchUserProfile(session.user);
+        } else {
+          setCurrentUser(null);
+          setCalendarEvents([]);
+          setCurrentPage("dashboard");
+          setStudyPlan(null);
+        }
+      } catch (err) {
+        console.error("Auth state change error:", err);
+        setCurrentUser(null);
+        setCalendarEvents([]);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => {
-      authListener.subscription.unsubscribe();
+      subscription.unsubscribe();
     };
   }, []);
 
