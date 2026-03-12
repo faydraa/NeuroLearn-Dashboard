@@ -1,3 +1,4 @@
+// Implement User Authentication 
 import { supabase } from './supabase'
 
 export async function signUpUser(
@@ -6,10 +7,12 @@ export async function signUpUser(
   userId: string,
   fullName: string
 ) {
+  // Sign-Up Request & Verification via Supabase
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
+      emailRedirectTo: window.location.origin,
       data: {
         user_id: userId,
         full_name: fullName,
@@ -21,6 +24,7 @@ export async function signUpUser(
   return data
 }
 
+// Store Existing User into NeuroLearn
 export async function loginUser(email: string, password: string) {
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
