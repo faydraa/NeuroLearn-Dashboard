@@ -172,7 +172,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       eegSubRef.current = sub;
 
       setMuseConnected(true);
-      alert("Muse connected! You can now start recording.");
+      alert("Muse connected! You can start recording.");
     } catch (e: any) {
       alert(e?.message || String(e));
     } finally {
@@ -370,7 +370,13 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                         <span className="block">
                           • <span className="font-semibold">Last 10 Minutes:</span> Start studying normally
                         </span>
+                           <li className="flex items-start gap-2">
+                    </li>                 
                       </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold">4.</span>
+                      <span>Before recording... Take a deep breath and relax for 1 minute</span>
                     </li>
                   </ul>
                 </div>
