@@ -20,9 +20,11 @@ export type RawEEGSample = {
 
 type RecordingStage = "eyesClosed" | "studying";
 
-const EYES_CLOSED_DURATION = 60;
-const STUDYING_DURATION = 10 * 60;
+// Restore these when you’re done testing
+const EYES_CLOSED_DURATION = 0;
+const STUDYING_DURATION = 0;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
+
 const MAX_POINTS = 512;
 const ANALYSIS_DURATION_MS = 15000;
 
@@ -206,7 +208,10 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         window.setTimeout(() => setStageBanner(null), 6000);
       }
 
-      const pct = Math.min((elapsed / RECORDING_DURATION) * 100, 100);
+      // Avoid division by zero when RECORDING_DURATION is 0
+      const pct =
+        RECORDING_DURATION > 0 ? Math.min((elapsed / RECORDING_DURATION) * 100, 100) : 100;
+
       setProgress(pct);
 
       if (pct >= 100) {
@@ -274,9 +279,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
   const totalRemaining = RECORDING_DURATION - elapsedSec;
   const stageRemaining =
-    recordingStage === "eyesClosed"
-      ? EYES_CLOSED_DURATION - elapsedSec
-      : RECORDING_DURATION - elapsedSec;
+    recordingStage === "eyesClosed" ? EYES_CLOSED_DURATION - elapsedSec : RECORDING_DURATION - elapsedSec;
 
   return (
     <div className="max-w-4xl mx-auto p-8">
@@ -345,36 +348,38 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                 <p className="text-gray-600">Muse is connected. You can start recording anytime.</p>
               )}
 
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-left">
-                <h3 className="font-bold text-blue-900 mb-3">Recording Instructions:</h3>
-                <ul className="space-y-2 text-blue-800 text-sm">
-                  <li className="flex items-start gap-2">
-                    <span className="font-bold">1.</span>
-                    <span>Ensure all 4 electrodes make good contact with your forehead/ears</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="font-bold">2.</span>
-                    <span>Stay relaxed and minimize head movements during recording</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="font-bold">3.</span>
-                    <span>
-                      The recording will last <span className="font-semibold">11 minutes</span>:
-                      <span className="block mt-1">
-                        • <span className="font-semibold">First Minute:</span> Close your eyes and relax
+              {museConnected && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-left">
+                  <h3 className="font-bold text-blue-900 mb-3">Recording Instructions:</h3>
+                  <ul className="space-y-2 text-blue-800 text-sm">
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold">1.</span>
+                      <span>Ensure all 4 electrodes make good contact with your forehead/ears</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold">2.</span>
+                      <span>Stay relaxed and minimize head movements during recording</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="font-bold">3.</span>
+                      <span>
+                        The recording will last <span className="font-semibold">11 minutes</span>:
+                        <span className="block mt-1">
+                          • <span className="font-semibold">First Minute:</span> Close your eyes and relax
+                        </span>
+                        <span className="block">
+                          • <span className="font-semibold">Last 10 Minutes:</span> Start studying normally
+                        </span>
                       </span>
-                      <span className="block">
-                        • <span className="font-semibold">Last 10 Minutes:</span> Start studying normally
-                      </span>
-                    </span>
-                  </li>
-                </ul>
-              </div>
+                    </li>
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {(isRecording || isAnalyzing) && (
+        {isRecording && (
           <div className="mb-8">
             <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
               <div
@@ -395,7 +400,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           </div>
         )}
 
-        {!isRecording && !isAnalyzing && (
+        {!isRecording && !isAnalyzing && museConnected && (
           <button
             onClick={startRecording}
             className="w-full bg-indigo-600 text-white py-4 rounded-xl font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
@@ -417,12 +422,13 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
         {isAnalyzing && (
           <div className="flex flex-col items-center gap-4">
-            <div className="flex gap-2">
+            <p className="text-gray-600 mb-4">Stay on this page for your personalised study plan!</p>
+
+            <div className="flex gap-4">
               <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
               <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
               <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
-            <p className="text-gray-600">Generating your study plan...</p>
           </div>
         )}
       </div>
