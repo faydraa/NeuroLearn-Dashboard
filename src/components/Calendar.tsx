@@ -205,7 +205,7 @@ export function Calendar({ userName, userId, events, setEvents }: CalendarProps)
     <div className="max-w-7xl mx-auto p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Study Calendar</h1>
-        <p className="text-gray-600">Plan your study sessions, exams, and assignments for {userName}</p>
+        <p className="text-gray-600">Plan your upcoming study sessions, assignments and more </p>
       </div>
 
       {error && (
@@ -254,15 +254,15 @@ export function Calendar({ userName, userId, events, setEvents }: CalendarProps)
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-red-500 rounded"></div>
-              <span className="text-sm text-gray-600">Exam</span>
+              <span className="text-sm text-gray-600">Exam/Assignment</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-blue-500 rounded"></div>
-              <span className="text-sm text-gray-600">Assignment</span>
+              <span className="text-sm text-gray-600">Personal Activity</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-purple-500 rounded"></div>
-              <span className="text-sm text-gray-600">Other</span>
+              <span className="text-sm text-gray-600">Others</span>
             </div>
           </div>
         </div>
@@ -357,8 +357,8 @@ export function Calendar({ userName, userId, events, setEvents }: CalendarProps)
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                   >
                     <option value="study">Study Session</option>
-                    <option value="exam">Exam</option>
-                    <option value="assignment">Assignment</option>
+                    <option value="exam">Exam/Assignment</option>
+                    <option value="assignment">Personal Activity</option>
                     <option value="other">Other</option>
                   </select>
                 </div>
