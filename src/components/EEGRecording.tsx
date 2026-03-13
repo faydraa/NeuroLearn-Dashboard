@@ -358,7 +358,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="font-bold">2.</span>
-                      <span>Stay relaxed and minimize head movements during recording</span>
+                      <span>Stay relaxed and minimise head movements during recording</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="font-bold">3.</span>
