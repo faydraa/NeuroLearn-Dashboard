@@ -282,7 +282,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     <div className="max-w-4xl mx-auto p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">EEG Recording Session</h1>
-        <p className="text-gray-600">Analyzing brainwave patterns to create your personalized study plan</p>
+        <p className="text-gray-600">Analysing brainwave patterns to create your personalised study plan</p>
       </div>
 
       <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
