@@ -253,40 +253,19 @@ export function Settings({ user, onUpdateProfile }: SettingsProps) {
           </div>
         </div>
 
-        {/* Account Information */}
-        <div className="p-8 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Account Information</h2>
-          <div className="bg-gray-50 rounded-xl p-6">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Username</p>
-                <p className="font-medium text-gray-900">{user.username}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Account Type</p>
-                <p className="font-medium text-gray-900">Student</p>
-              </div>
+        {/* Bottom Row */}
+        <div className="p-8">
+          <div className="flex items-end justify-between">
+            <div className="space-y-2">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Member Since</p>
                 <p className="font-medium text-gray-900">{memberSince}</p>
               </div>
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Status</p>
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  Active
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Save Button */}
-        <div className="p-8">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
               {isSaved && (
                 <p className="text-sm text-green-600 font-medium">✓ Changes saved successfully!</p>
               )}
+
               {error && (
                 <div className="flex items-center gap-2 text-sm text-red-600 font-medium">
                   <AlertCircle className="w-4 h-4" />
