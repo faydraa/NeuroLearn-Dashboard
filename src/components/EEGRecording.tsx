@@ -4,6 +4,10 @@ import type { StudyPlan } from "../App";
 import { MuseClient } from "muse-js";
 import type { SubscriptionLike } from "rxjs";
 import { EEGWaveform } from "./EEGWaveform";
+import { supabase } from "../library/supabase";
+
+// ✅ Rule-based plan (must exist)
+import { generateRuleBasedPlan } from "../library/rulebasedstudy";
 
 type EEGRecordingProps = {
   onComplete: (studyPlan: StudyPlan) => void;
@@ -21,12 +25,15 @@ export type RawEEGSample = {
 type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
-const EYES_CLOSED_DURATION = 60;
-const STUDYING_DURATION = 10 * 60;
+const EYES_CLOSED_DURATION = 10;
+const STUDYING_DURATION = 0;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
 const ANALYSIS_DURATION_MS = 15000;
+
+// ✅ MOCK focus CSV (acts like "focus_scores bucket" for now)
+const MOCK_FOCUS_CSV_URL = `${process.env.PUBLIC_URL}/mock/test1_natural_filtered.csv_focus_scores.csv`;
 
 function formatMMSS(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -59,6 +66,37 @@ function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   localStorage.setItem("studyProgress", JSON.stringify(progress));
 }
 
+// ✅ Fetch mock CSV text from /public
+async function fetchCsvText(url: string): Promise<string> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch CSV (${res.status}): ${url}`);
+  return await res.text();
+}
+
+// ✅ Mean of a CSV column (p_focus_smoothed)
+function meanOfColumn(csvText: string, columnName: string): number {
+  const lines = csvText.trim().split(/\r?\n/);
+  if (lines.length < 2) throw new Error("CSV has no data rows.");
+
+  const headers = lines[0].split(",");
+  const idx = headers.indexOf(columnName);
+  if (idx === -1) throw new Error(`Column "${columnName}" not found in CSV.`);
+
+  let sum = 0;
+  let n = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",");
+    const val = Number(cols[idx]);
+    if (!Number.isFinite(val)) continue;
+    sum += val;
+    n += 1;
+  }
+
+  if (n === 0) throw new Error(`No numeric values found in column "${columnName}".`);
+  return sum / n;
+}
+
 export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const [museConnected, setMuseConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -84,6 +122,12 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const fullSessionRef = useRef<RawEEGSample[]>([]);
   const startTimeRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
+
+  // ✅ avoid “stuck analyzing” if parent re-renders
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -208,10 +252,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         window.setTimeout(() => setStageBanner(null), 6000);
       }
 
-      // Avoid division by zero when RECORDING_DURATION is 0
-      const pct =
-        RECORDING_DURATION > 0 ? Math.min((elapsed / RECORDING_DURATION) * 100, 100) : 100;
-
+      const pct = RECORDING_DURATION > 0 ? Math.min((elapsed / RECORDING_DURATION) * 100, 100) : 100;
       setProgress(pct);
 
       if (pct >= 100) {
@@ -234,34 +275,90 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     };
   }, [isRecording]);
 
-  const generateStudyPlan = useCallback(() => {
-    const totalDuration = 120;
-
-    const breaks = [
-      { time: 45, duration: 5, type: "Water break" },
-      { time: 90, duration: 10, type: "Snack break" },
-    ];
-
-    const plan: StudyPlan = {
-      totalDuration,
-      breaks,
-      subjects: [],
-      generatedAt: new Date(),
-    };
-
-    addPlannedMinutesForToday(totalDuration);
-    onComplete(plan);
-  }, [onComplete]);
-
   useEffect(() => {
     if (!isAnalyzing) return;
 
-    const t = window.setTimeout(() => {
-      generateStudyPlan();
-    }, ANALYSIS_DURATION_MS);
+    let cancelled = false;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    return () => window.clearTimeout(t);
-  }, [isAnalyzing, generateStudyPlan]);
+    // ✅ your raw EEG upload stays exactly as you wrote it
+    const uploadEEGData = async () => {
+      try {
+        const sessionData = fullSessionRef.current;
+        if (!sessionData || sessionData.length === 0) return;
+
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+        if (authError || !user) {
+          console.error("Upload blocked: User is not authenticated.", authError);
+          return;
+        }
+
+        const headers = ["timestamp", "tp9", "af7", "af8", "tp10"];
+        const csvRows = [headers.join(",")];
+
+        sessionData.forEach((sample) => {
+          csvRows.push(`${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10}`);
+        });
+
+        const csvString = csvRows.join("\n");
+        const blob = new Blob([csvString], { type: "text/csv" });
+        const fileName = `${user.id}/session_${Date.now()}.csv`;
+
+        const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
+          contentType: "text/csv",
+        });
+
+        if (error) {
+          console.error("Failed to upload EEG data to Supabase:", error.message);
+        } else {
+          console.log(`Successfully uploaded to ${fileName}`);
+        }
+      } catch (err) {
+        console.error("Unexpected error during Supabase upload:", err);
+      }
+    };
+
+    (async () => {
+      try {
+        // 1) Upload raw EEG to Supabase (kept)
+        uploadEEGData();
+
+        // 2) Wait for “analysis”
+        await sleep(ANALYSIS_DURATION_MS);
+
+        // 3) Read mock focus scores CSV locally
+        const csvText = await fetchCsvText(MOCK_FOCUS_CSV_URL);
+
+        // 4) Compute mean focus + generate rule-based plan
+        const meanFocus = meanOfColumn(csvText, "p_focus_smoothed");
+        const plan = generateRuleBasedPlan(meanFocus);
+
+        // 5) Save planned minutes + redirect
+        addPlannedMinutesForToday(plan.totalDuration);
+
+        if (!cancelled) {
+          onCompleteRef.current(plan);
+        }
+      } catch (err: any) {
+        console.error("Rule-based plan generation failed (mock CSV):", err);
+        if (!cancelled) {
+          alert(
+            "Could not generate study plan from mock focus CSV.\n\n" +
+              "Check:\n" +
+              "• public/mock/test1_natural_filtered.csv_focus_scores.csv exists\n" +
+              "• CSV contains 'p_focus_smoothed'\n" +
+              "• Try opening /mock/test1_natural_filtered.csv_focus_scores.csv in your browser"
+          );
+          setIsAnalyzing(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAnalyzing]);
 
   const startRecording = () => {
     if (!museConnected) {
@@ -370,8 +467,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                         <span className="block">
                           • <span className="font-semibold">Last 10 Minutes:</span> Start studying normally
                         </span>
-                           <li className="flex items-start gap-2">
-                    </li>                 
                       </span>
                     </li>
                     <li className="flex items-start gap-2">

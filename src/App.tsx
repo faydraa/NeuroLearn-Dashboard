@@ -17,6 +17,9 @@ export type StudyPlan = {
   breaks: { time: number; duration: number; type: string }[];
   subjects: { name: string; duration: number; startTime: number }[];
   generatedAt: Date;
+
+  meanFocus?: number;
+  focusBand?: string;
 };
 
 export type User = {
