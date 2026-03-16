@@ -5,8 +5,6 @@ import { MuseClient } from "muse-js";
 import type { SubscriptionLike } from "rxjs";
 import { EEGWaveform } from "./EEGWaveform";
 import { supabase } from "../library/supabase";
-
-// ✅ Rule-based plan (must exist)
 import { generateRuleBasedPlan } from "../library/rulebasedstudy";
 
 type EEGRecordingProps = {
