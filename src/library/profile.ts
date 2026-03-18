@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 
-// Update Profile Details into Supabase
+// Update Profile Details between Supabase and UI
 export type ProfileUpdates = {
   full_name?: string;
   avatar?: string;
@@ -21,4 +21,3 @@ export async function updateUserProfile(userId: string, updates: ProfileUpdates)
   if (error) throw error;
   return data;
 }
-

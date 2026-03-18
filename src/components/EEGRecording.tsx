@@ -279,7 +279,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    // ✅ your raw EEG upload stays exactly as you wrote it
+    // Export Recorded EEG Data as .csv file into Supabase
     const uploadEEGData = async () => {
       try {
         const sessionData = fullSessionRef.current;

@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 
+// Update Calendar Events between Supabase and UI
 export async function getCalendarEvents(userId: string) {
   const { data, error } = await supabase
     .from("calendar_events")
