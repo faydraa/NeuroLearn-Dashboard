@@ -31,8 +31,8 @@ function breakTypeFor(i: number) {
   return types[i % types.length];
 }
 
-export function generateRuleBasedPlan(meanFocus: number): StudyPlan {
-  const focusBand = classifyMeanFocus(meanFocus);
+export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
+  const focusBand = classifyMeanFocus(baseline_mean_focus);
   const { studyMin, breakMin, targetTotalMin } = bandProfile(focusBand);
 
   let t = 0; // minutes elapsed
@@ -59,7 +59,7 @@ export function generateRuleBasedPlan(meanFocus: number): StudyPlan {
     breaks,
     subjects: [],
     generatedAt: new Date(),
-    meanFocus,
+    baseline_mean_focus,
     focusBand, // stored as string in StudyPlan
   };
 }

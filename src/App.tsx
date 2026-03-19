@@ -18,7 +18,7 @@ export type StudyPlan = {
   subjects: { name: string; duration: number; startTime: number }[];
   generatedAt: Date;
 
-  meanFocus?: number;
+  baseline_mean_focus?: number;
   focusBand?: string;
 };
 

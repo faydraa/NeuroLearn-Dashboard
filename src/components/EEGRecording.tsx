@@ -18,6 +18,9 @@ export type RawEEGSample = {
   af7: number;
   af8: number;
   tp10: number;
+  accX: number;
+  accY: number;
+  accZ: number;
 };
 
 type RecordingStage = "eyesClosed" | "studying";
@@ -28,10 +31,6 @@ const STUDYING_DURATION = 0;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
-const ANALYSIS_DURATION_MS = 15000;
-
-// ✅ MOCK focus CSV (acts like "focus_scores bucket" for now)
-const MOCK_FOCUS_CSV_URL = `${process.env.PUBLIC_URL}/mock/test1_natural_filtered.csv_focus_scores.csv`;
 
 function formatMMSS(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -62,13 +61,6 @@ function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   }
 
   localStorage.setItem("studyProgress", JSON.stringify(progress));
-}
-
-// ✅ Fetch mock CSV text from /public
-async function fetchCsvText(url: string): Promise<string> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch CSV (${res.status}): ${url}`);
-  return await res.text();
 }
 
 // ✅ Mean of a CSV column (p_focus_smoothed)
@@ -111,7 +103,12 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const [waveformData, setWaveformData] = useState<RawEEGSample[]>([]);
 
   const eegSubRef = useRef<SubscriptionLike | null>(null);
-  const latestRef = useRef<{ tp9?: number; af7?: number; af8?: number; tp10?: number }>({});
+  const accSubRef = useRef<SubscriptionLike | null>(null);
+  
+  const latestRef = useRef<{ 
+    tp9?: number; af7?: number; af8?: number; tp10?: number;
+    accX?: number; accY?: number; accZ?: number;
+  }>({});
   const isRecordingRef = useRef(false);
 
   const bufferRef = useRef<RawEEGSample[]>([]);
@@ -121,7 +118,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const startTimeRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
 
-  // ✅ avoid “stuck analyzing” if parent re-renders
   const onCompleteRef = useRef(onComplete);
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -134,6 +130,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   useEffect(() => {
     return () => {
       eegSubRef.current?.unsubscribe();
+      accSubRef.current?.unsubscribe();
 
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -180,6 +177,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       await client.connect();
       await client.start();
 
+      const accSub = client.accelerometerData.subscribe((reading: any) => {
+        const last = reading.samples?.[reading.samples.length - 1];
+        if (!last) return;
+        
+        latestRef.current.accX = last.x;
+        latestRef.current.accY = last.y;
+        latestRef.current.accZ = last.z;
+      });
+
       const sub = client.eegReadings.subscribe((reading: any) => {
         const last = reading.samples?.[reading.samples.length - 1];
         if (typeof last !== "number") return;
@@ -191,8 +197,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
         if (!isRecordingRef.current) return;
 
-        const { tp9, af7, af8, tp10 } = latestRef.current;
-        if ([tp9, af7, af8, tp10].some((v) => typeof v !== "number")) return;
+        const { tp9, af7, af8, tp10, accX, accY, accZ } = latestRef.current;
+        
+        if ([tp9, af7, af8, tp10, accX, accY, accZ].some((v) => typeof v !== "number")) return;
 
         const sample: RawEEGSample = {
           timestamp: Date.now(),
@@ -200,6 +207,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           af7: af7 as number,
           af8: af8 as number,
           tp10: tp10 as number,
+          accX: accX as number, 
+          accY: accY as number, 
+          accZ: accZ as number, 
         };
 
         fullSessionRef.current.push(sample);
@@ -211,7 +221,10 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       });
 
       eegSubRef.current?.unsubscribe();
+      accSubRef.current?.unsubscribe();
+
       eegSubRef.current = sub;
+      accSubRef.current = accSub;
 
       setMuseConnected(true);
       alert("Muse connected! You can start recording.");
@@ -279,29 +292,31 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    // Export Recorded EEG Data as .csv file into Supabase
-    const uploadEEGData = async () => {
+    // 1. Export Raw EEG Data to Supabase
+    const uploadEEGData = async (): Promise<boolean> => {
       try {
         const sessionData = fullSessionRef.current;
-        if (!sessionData || sessionData.length === 0) return;
+        if (!sessionData || sessionData.length === 0) return false;
 
         const { data: { user }, error: authError } = await supabase.auth.getUser();
 
         if (authError || !user) {
           console.error("Upload blocked: User is not authenticated.", authError);
-          return;
+          return false;
         }
 
-        const headers = ["timestamp", "tp9", "af7", "af8", "tp10"];
+        const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
         const csvRows = [headers.join(",")];
 
         sessionData.forEach((sample) => {
-          csvRows.push(`${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10}`);
+          csvRows.push(`${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`);
         });
 
         const csvString = csvRows.join("\n");
         const blob = new Blob([csvString], { type: "text/csv" });
-        const fileName = `${user.id}/session_${Date.now()}.csv`;
+        
+        // Save to raw_test_data > baseline
+        const fileName = `baseline/${user.id}_session_${Date.now()}.csv`;
 
         const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
           contentType: "text/csv",
@@ -309,45 +324,87 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
         if (error) {
           console.error("Failed to upload EEG data to Supabase:", error.message);
-        } else {
-          console.log(`Successfully uploaded to ${fileName}`);
+          return false;
         }
+        
+        console.log(`Successfully uploaded to ${fileName}`);
+        return true;
       } catch (err) {
         console.error("Unexpected error during Supabase upload:", err);
+        return false;
       }
     };
 
     (async () => {
       try {
-        // 1) Upload raw EEG to Supabase (kept)
-        uploadEEGData();
+        const uploadStartTime = Date.now();
+        const uploadSuccess = await uploadEEGData();
 
-        // 2) Wait for “analysis”
-        await sleep(ANALYSIS_DURATION_MS);
+        if (!uploadSuccess && !cancelled) {
+          alert("Raw upload failed. Cannot generate plan.");
+          setIsAnalyzing(false);
+          return;
+        }
 
-        // 3) Read mock focus scores CSV locally
-        const csvText = await fetchCsvText(MOCK_FOCUS_CSV_URL);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("User not found for fetching scores.");
 
-        // 4) Compute mean focus + generate rule-based plan
-        const meanFocus = meanOfColumn(csvText, "p_focus_smoothed");
-        const plan = generateRuleBasedPlan(meanFocus);
+        // 2. The Polling Loop: Wait for the Python script to finish processing
+        let csvText = "";
+        
+        // We will check Supabase up to 30 times (every 2 seconds) = 60 seconds max wait
+        for (let i = 0; i < 30; i++) {
+          if (cancelled) return;
 
-        // 5) Save planned minutes + redirect
+          // Look inside focus_scores > baseline > userid
+          const folderPath = `baseline/${user.id}`;
+          const { data } = await supabase.storage
+            .from("focus_scores")
+            .list(folderPath, {
+              sortBy: { column: 'created_at', order: 'desc' },
+              limit: 1 // Only grab the newest file
+            });
+
+          if (data && data.length > 0) {
+            const latestFile = data[0];
+            const createdAt = new Date(latestFile.created_at).getTime();
+
+            // Ensure this file was generated AFTER we uploaded our raw data
+            if (createdAt > uploadStartTime - 5000) {
+              
+              // 3. Download the processed file!
+              const { data: blob } = await supabase.storage
+                .from("focus_scores")
+                .download(`${folderPath}/${latestFile.name}`);
+
+              if (blob) {
+                csvText = await blob.text();
+                break; // Exit the loop early
+              }
+            }
+          }
+          await sleep(2000); // File not there yet? Wait 2 seconds and check again.
+        }
+
+        if (!csvText) {
+          throw new Error("Timed out waiting for the backend Python scripts to finish.");
+        }
+
+        // 4. Compute real mean focus from the downloaded CSV + generate plan
+        const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
+        const plan = generateRuleBasedPlan(baseline_mean_focus);
+
+        // 5. Save planned minutes + trigger redirect
         addPlannedMinutesForToday(plan.totalDuration);
 
         if (!cancelled) {
           onCompleteRef.current(plan);
         }
+
       } catch (err: any) {
-        console.error("Rule-based plan generation failed (mock CSV):", err);
+        console.error("Plan generation failed:", err);
         if (!cancelled) {
-          alert(
-            "Could not generate study plan from mock focus CSV.\n\n" +
-              "Check:\n" +
-              "• public/mock/test1_natural_filtered.csv_focus_scores.csv exists\n" +
-              "• CSV contains 'p_focus_smoothed'\n" +
-              "• Try opening /mock/test1_natural_filtered.csv_focus_scores.csv in your browser"
-          );
+          alert(`Could not generate study plan: ${err.message}`);
           setIsAnalyzing(false);
         }
       }
