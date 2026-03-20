@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 10 * 0;
+const STUDYING_DURATION = 10 * 60;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -337,7 +337,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
     (async () => {
       try {
-        const uploadStartTime = Date.now();
         const uploadSuccess = await uploadEEGData();
 
         if (!uploadSuccess && !cancelled) {
@@ -352,37 +351,49 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         // 2. The Polling Loop: Wait for the Python script to finish processing
         let csvText = "";
         
-        // Option 1: Infinite polling loop. Checks every 3 seconds until the file appears.
+        // Option 1: Infinite polling loop with explicit CSV filtering and debugging
         while (!cancelled) {
-          // Look inside focus_scores > baseline > userid
           const folderPath = `baseline/${user.id}`;
-          const { data } = await supabase.storage
+          
+          // List files
+          const { data, error } = await supabase.storage
             .from("focus_scores")
             .list(folderPath, {
               sortBy: { column: 'created_at', order: 'desc' },
-              limit: 1 // Only grab the newest file
             });
 
-          if (data && data.length > 0) {
-            const latestFile = data[0];
-            const createdAt = new Date(latestFile.created_at).getTime();
+          if (error) {
+            console.error("Supabase list error:", error);
+          }
 
-            // Ensure this file was generated AFTER we uploaded our raw data
-            if (createdAt > uploadStartTime - 5000) {
-              
-              // 3. Download the processed file!
-              const { data: blob } = await supabase.storage
+          if (data && data.length > 0) {
+            // Filter out any Supabase folder placeholders, ONLY look at .csv files
+            const csvFiles = data.filter(f => f.name.endsWith(".csv"));
+
+            if (csvFiles.length > 0) {
+              const latestFile = csvFiles[0];
+              console.log("👀 Found newest CSV:", latestFile.name);
+
+              // Download the file
+              const { data: blob, error: downloadError } = await supabase.storage
                 .from("focus_scores")
                 .download(`${folderPath}/${latestFile.name}`);
 
-              if (blob) {
+              if (downloadError) {
+                console.error("❌ Download error:", downloadError);
+              } else if (blob) {
                 csvText = await blob.text();
+                console.log("✅ Successfully downloaded and read the CSV!");
                 break; // File found! Exit the infinite loop
               }
+            } else {
+               console.log("Waiting for .csv file... (Only found folders/placeholders)");
             }
+          } else {
+             console.log("Waiting for file... (Folder is empty)");
           }
           
-          // Wait 3 seconds before checking again to avoid spamming the database
+          // Wait 3 seconds before checking again
           await sleep(3000); 
         }
 
