@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 0;
+const STUDYING_DURATION = 10 * 0;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -316,7 +316,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const blob = new Blob([csvString], { type: "text/csv" });
         
         // Save to raw_test_data > baseline
-        const fileName = `baseline/${user.id}_session_${Date.now()}.csv`;
+        const fileName = `baseline/${user.id}/session_${Date.now()}.csv`;
 
         const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
           contentType: "text/csv",
