@@ -63,7 +63,7 @@ function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   localStorage.setItem("studyProgress", JSON.stringify(progress));
 }
 
-// ✅ Mean of a CSV column (p_focus_smoothed)
+// Mean of a CSV column (p_focus_smoothed)
 function meanOfColumn(csvText: string, columnName: string): number {
   const lines = csvText.trim().split(/\r?\n/);
   if (lines.length < 2) throw new Error("CSV has no data rows.");
@@ -352,10 +352,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         // 2. The Polling Loop: Wait for the Python script to finish processing
         let csvText = "";
         
-        // We will check Supabase up to 30 times (every 2 seconds) = 60 seconds max wait
-        for (let i = 0; i < 30; i++) {
-          if (cancelled) return;
-
+        // Option 1: Infinite polling loop. Checks every 3 seconds until the file appears.
+        while (!cancelled) {
           // Look inside focus_scores > baseline > userid
           const folderPath = `baseline/${user.id}`;
           const { data } = await supabase.storage
@@ -379,15 +377,19 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
               if (blob) {
                 csvText = await blob.text();
-                break; // Exit the loop early
+                break; // File found! Exit the infinite loop
               }
             }
           }
-          await sleep(2000); // File not there yet? Wait 2 seconds and check again.
+          
+          // Wait 3 seconds before checking again to avoid spamming the database
+          await sleep(3000); 
         }
 
+        if (cancelled) return;
+
         if (!csvText) {
-          throw new Error("Timed out waiting for the backend Python scripts to finish.");
+          throw new Error("Failed to read the downloaded CSV file.");
         }
 
         // 4. Compute real mean focus from the downloaded CSV + generate plan
