@@ -200,44 +200,45 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
 
   const uploadStudySessionData = useCallback(
   async (elapsedSeconds: number) => {
-    setIsUploading(true);
+    console.log("Step 1: Preparing to upload study session...");
 
     try {
       const sessionData = fullSessionRef.current;
+      console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
 
-      console.log("Uploading study session...");
-      console.log("Samples collected:", sessionData?.length);
+      // ⬇️ PUT TIMEOUT CODE HERE
+      const sessionResult: any = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Auth request timed out")), 8000)
+        ),
+      ]);
 
-      // 🔐 Get authenticated user
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
+      const session = sessionResult?.data?.session ?? null;
+      const user = session?.user ?? null;
 
-      console.log("User:", user);
+      console.log("Auth result:", sessionResult);
 
-      if (authError || !user) {
-        alert("Upload blocked: You are not logged in.");
-        throw new Error("User not authenticated");
+      if (!user) {
+        throw new Error("No authenticated session found");
       }
+
+      console.log("Step 3: Authenticated as user:", user.id);
 
       if (!sessionData || sessionData.length === 0) {
-        alert("No EEG data recorded.");
-        throw new Error("Empty session data");
+        throw new Error("No EEG data was recorded");
       }
 
-      // 📄 Convert to CSV (same format as baseline)
       const headers = [
         "timestamp",
-        "tp9",
-        "af7",
-        "af8",
-        "tp10",
-        "accX",
-        "accY",
-        "accZ",
+        "eeg_1",
+        "eeg_2",
+        "eeg_3",
+        "eeg_4",
+        "acc_1",
+        "acc_2",
+        "acc_3",
       ];
-
       const csvRows = [headers.join(",")];
 
       sessionData.forEach((sample) => {
@@ -249,33 +250,27 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
       const csvString = csvRows.join("\n");
       const blob = new Blob([csvString], { type: "text/csv" });
 
-      // 📁 EXACT REQUIRED PATH
-      const filePath = `study session/${user.id}/session_${Date.now()}.csv`;
+      const fileName = `study session/${user.id}/session_${Date.now()}.csv`;
+      console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
 
-      console.log("Uploading to:", filePath);
-
-      const { error: uploadError } = await supabase.storage
+      const { error } = await supabase.storage
         .from("raw_test_data")
-        .upload(filePath, blob, {
+        .upload(fileName, blob, {
           contentType: "text/csv",
           upsert: false,
         });
 
-      if (uploadError) throw uploadError;
+      if (error) throw error;
 
-      console.log("✅ Study session uploaded successfully");
+      console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
 
-      // ✅ Same behaviour as baseline
       saveProgress(elapsedSeconds);
       onComplete();
-
     } catch (err: any) {
-      console.error("❌ Upload failed:", err);
-      alert("Upload failed: " + (err.message || String(err)));
-
-      hasFinishedRef.current = false;
-    } finally {
+      console.error("CRITICAL ERROR during upload:", err);
+      alert("Failed to upload session data: " + (err?.message || String(err)));
       setIsUploading(false);
+      hasFinishedRef.current = false;
     }
   },
   [saveProgress, onComplete]

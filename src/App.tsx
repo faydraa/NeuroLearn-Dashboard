@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import type { User as AuthUser } from "@supabase/supabase-js";
 import { LoginPage } from "./components/LoginPage";
 import { Dashboard } from "./components/Dashboard";
 import { EEGRecording } from "./components/EEGRecording";
@@ -18,6 +17,7 @@ export type StudyPlan = {
   breaks: { time: number; duration: number; type: string }[];
   subjects: { name: string; duration: number; startTime: number }[];
   generatedAt: Date;
+
   baseline_mean_focus?: number;
   focusBand?: string;
 };
@@ -52,7 +52,6 @@ const EVENT_TYPE_COLORS: Record<CalendarEvent["type"], string> = {
 };
 
 export default function App() {
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState<
@@ -69,8 +68,6 @@ export default function App() {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
 
   useEffect(() => {
-    let mounted = true;
-
     const fetchCalendarEvents = async (authUserId: string) => {
       try {
         const { data, error } = await supabase
@@ -93,67 +90,46 @@ export default function App() {
             "bg-purple-500",
         }));
 
-        if (mounted) {
-          setCalendarEvents(mappedEvents);
-        }
+        setCalendarEvents(mappedEvents);
       } catch (err) {
         console.error("Failed to fetch calendar events:", err);
-        if (mounted) {
-          setCalendarEvents([]);
-        }
+        setCalendarEvents([]);
       }
     };
 
-    const fetchUserProfile = async (user: AuthUser) => {
+    const fetchUserProfile = async (authUser: any) => {
       try {
         const { data, error } = await supabase
           .from("profiles")
           .select("*")
-          .eq("id", user.id)
-          .maybeSingle();
+          .eq("id", authUser.id)
+          .single();
 
-        if (error) {
-          console.error("Error fetching profile:", error.message);
+        if (error || !data) {
+          console.error("Error fetching profile:", error?.message || "No profile found");
+          setCurrentUser(null);
+          setCalendarEvents([]);
+          return;
         }
 
-        const fallbackUsername =
-          data?.user_id || user.user_metadata?.user_id || user.email?.split("@")[0] || "user";
+        setCurrentUser({
+          id: data.id,
+          username: data.user_id,
+          name: data.full_name || data.user_id,
+          avatar: data.avatar || "🐼",
+          age: data.age || undefined,
+          gender: data.gender || undefined,
+          email: authUser.email || undefined,
+          gradeLevel: data.grade_level || undefined,
+          bio: data.bio || undefined,
+          createdAt: data.created_at || undefined,
+        });
 
-        const fallbackName =
-          data?.full_name ||
-          user.user_metadata?.full_name ||
-          user.email?.split("@")[0] ||
-          "User";
-
-        if (mounted) {
-          setCurrentUser({
-            id: user.id,
-            username: fallbackUsername,
-            name: fallbackName,
-            avatar: data?.avatar || "🐼",
-            age: data?.age ?? undefined,
-            gender: data?.gender ?? undefined,
-            email: user.email ?? undefined,
-            gradeLevel: data?.grade_level ?? undefined,
-            bio: data?.bio ?? undefined,
-            createdAt: data?.created_at ?? undefined,
-          });
-        }
-
-        await fetchCalendarEvents(user.id);
+        await fetchCalendarEvents(authUser.id);
       } catch (err) {
         console.error("Unexpected profile fetch error:", err);
-
-        if (mounted) {
-          setCurrentUser({
-            id: user.id,
-            username: user.user_metadata?.user_id || user.email?.split("@")[0] || "user",
-            name: user.user_metadata?.full_name || user.email?.split("@")[0] || "User",
-            avatar: "🐼",
-            email: user.email ?? undefined,
-          });
-          setCalendarEvents([]);
-        }
+        setCurrentUser(null);
+        setCalendarEvents([]);
       }
     };
 
@@ -163,10 +139,6 @@ export default function App() {
           data: { session },
         } = await supabase.auth.getSession();
 
-        if (!mounted) return;
-
-        setAuthUser(session?.user ?? null);
-
         if (session?.user) {
           await fetchUserProfile(session.user);
         } else {
@@ -175,15 +147,10 @@ export default function App() {
         }
       } catch (err) {
         console.error("Initial session fetch error:", err);
-        if (mounted) {
-          setAuthUser(null);
-          setCurrentUser(null);
-          setCalendarEvents([]);
-        }
+        setCurrentUser(null);
+        setCalendarEvents([]);
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 
@@ -193,10 +160,6 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       try {
-        if (!mounted) return;
-
-        setAuthUser(session?.user ?? null);
-
         if (session?.user) {
           await fetchUserProfile(session.user);
         } else {
@@ -207,25 +170,20 @@ export default function App() {
         }
       } catch (err) {
         console.error("Auth state change error:", err);
-        if (mounted) {
-          setCurrentUser(null);
-          setCalendarEvents([]);
-        }
+        setCurrentUser(null);
+        setCalendarEvents([]);
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     });
 
     return () => {
-      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
   useEffect(() => {
-    if (!authUser || !currentUser) return;
+    if (!currentUser) return;
 
     let hourlyInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -251,12 +209,11 @@ export default function App() {
       clearTimeout(timeout);
       if (hourlyInterval) clearInterval(hourlyInterval);
     };
-  }, [authUser, currentUser]);
+  }, [currentUser]);
 
   const handleLogout = async () => {
     try {
       await logoutUser();
-      setAuthUser(null);
       setCurrentUser(null);
       setCurrentPage("dashboard");
       setStudyPlan(null);
@@ -282,21 +239,13 @@ export default function App() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-600 text-lg">Loading...</p>
+        <p className="text-gray-600 text-lg">Verifying Account...</p>
       </div>
     );
-  }
-
-  if (!authUser) {
-    return <LoginPage />;
   }
 
   if (!currentUser) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-600 text-lg">Loading profile...</p>
-      </div>
-    );
+    return <LoginPage />;
   }
 
   return (
