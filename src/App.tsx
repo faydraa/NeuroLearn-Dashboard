@@ -271,7 +271,7 @@ export default function App() {
         )}
 
         {currentPage === "study" && studyPlan && (
-          <StudySession studyPlan={studyPlan} onComplete={handleStudyComplete} userId={currentUser.id} />
+          <StudySession studyPlan={studyPlan} onComplete={handleStudyComplete} />
         )}
 
         {currentPage === "progress" && <ProgressTracking userName={currentUser.username} />}
