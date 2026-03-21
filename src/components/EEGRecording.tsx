@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Brain, Activity, AlertTriangle, RefreshCw } from "lucide-react";
+import { Brain, Activity, AlertTriangle } from "lucide-react";
 import type { StudyPlan } from "../App";
 import { MuseClient } from "muse-js";
 import type { SubscriptionLike } from "rxjs";
@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 10 * 0; // Set to 10 for quick testing, 600 for real study
+const STUDYING_DURATION = 10 * 0;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -93,8 +93,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
   const [isRecording, setIsRecording] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isChecking, setIsChecking] = useState(false); // New state for our manual button
-  const [uploadComplete, setUploadComplete] = useState(false); // Track if raw data finished uploading
   const [progress, setProgress] = useState(0);
 
   const [recordingStage, setRecordingStage] = useState<RecordingStage>("eyesClosed");
@@ -288,18 +286,24 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     };
   }, [isRecording]);
 
-  // Upload Effect: ONLY handles the upload now, no more polling loops!
   useEffect(() => {
     if (!isAnalyzing) return;
-    let cancelled = false;
 
-    const uploadEEGData = async () => {
+    let cancelled = false;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    // 1. Export Raw EEG Data to Supabase
+    const uploadEEGData = async (): Promise<boolean> => {
       try {
         const sessionData = fullSessionRef.current;
-        if (!sessionData || sessionData.length === 0) return;
+        if (!sessionData || sessionData.length === 0) return false;
 
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+        if (authError || !user) {
+          console.error("Upload blocked: User is not authenticated.", authError);
+          return false;
+        }
 
         const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
         const csvRows = [headers.join(",")];
@@ -311,91 +315,118 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const csvString = csvRows.join("\n");
         const blob = new Blob([csvString], { type: "text/csv" });
         
+        // Save to raw_test_data > baseline
         const fileName = `baseline/${user.id}/session_${Date.now()}.csv`;
 
         const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
           contentType: "text/csv",
         });
 
-        if (!error && !cancelled) {
-          console.log(`Successfully uploaded raw file to ${fileName}`);
-          setUploadComplete(true);
+        if (error) {
+          console.error("Failed to upload EEG data to Supabase:", error.message);
+          return false;
         }
+        
+        console.log(`Successfully uploaded to ${fileName}`);
+        return true;
       } catch (err) {
-        console.error("Upload failed:", err);
+        console.error("Unexpected error during Supabase upload:", err);
+        return false;
       }
     };
 
-    uploadEEGData();
+    (async () => {
+      try {
+        const uploadSuccess = await uploadEEGData();
+
+        if (!uploadSuccess && !cancelled) {
+          alert("Raw upload failed. Cannot generate plan.");
+          setIsAnalyzing(false);
+          return;
+        }
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("User not found for fetching scores.");
+
+        // 2. The Polling Loop: Wait for the Python script to finish processing
+        let csvText = "";
+        
+        // Option 1: Infinite polling loop with explicit CSV filtering and debugging
+        while (!cancelled) {
+          const folderPath = `baseline/${user.id}`;
+          
+          // List files
+          const { data, error } = await supabase.storage
+            .from("focus_scores")
+            .list(folderPath, {
+              sortBy: { column: 'created_at', order: 'desc' },
+            });
+
+          if (error) {
+            console.error("Supabase list error:", error);
+          }
+
+          if (data && data.length > 0) {
+            // Filter out any Supabase folder placeholders, ONLY look at .csv files
+            const csvFiles = data.filter(f => f.name.endsWith(".csv"));
+
+            if (csvFiles.length > 0) {
+              const latestFile = csvFiles[0];
+              console.log("👀 Found newest CSV:", latestFile.name);
+
+              // Download the file
+              const { data: blob, error: downloadError } = await supabase.storage
+                .from("focus_scores")
+                .download(`${folderPath}/${latestFile.name}`);
+
+              if (downloadError) {
+                console.error("❌ Download error:", downloadError);
+              } else if (blob) {
+                csvText = await blob.text();
+                console.log("✅ Successfully downloaded and read the CSV!");
+                break; // File found! Exit the infinite loop
+              }
+            } else {
+               console.log("Waiting for .csv file... (Only found folders/placeholders)");
+            }
+          } else {
+             console.log("Waiting for file... (Folder is empty)");
+          }
+          
+          // Wait 3 seconds before checking again
+          await sleep(3000); 
+        }
+
+        if (cancelled) return;
+
+        if (!csvText) {
+          throw new Error("Failed to read the downloaded CSV file.");
+        }
+
+        // 4. Compute real mean focus from the downloaded CSV + generate plan
+        const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
+        const plan = generateRuleBasedPlan(baseline_mean_focus);
+
+        // 5. Save planned minutes + trigger redirect
+        addPlannedMinutesForToday(plan.totalDuration);
+
+        if (!cancelled) {
+          onCompleteRef.current(plan);
+        }
+
+      } catch (err: any) {
+        console.error("Plan generation failed:", err);
+        if (!cancelled) {
+          alert(`Could not generate study plan: ${err.message}`);
+          setIsAnalyzing(false);
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
   }, [isAnalyzing]);
-
-  // MANUAL BUTTON FETCH LOGIC
-  const handleCheckResults = async () => {
-  console.log("HANDLE CHECK RESULTS CLICKED");
-  setIsChecking(true);
-
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    console.log("USER:", user);
-
-    if (!user) throw new Error("User not found");
-
-    const folderPath = `baseline/${user.id}`;
-    console.log("FOLDER PATH:", folderPath);
-
-    const { data, error } = await supabase.storage
-      .from("focus_scores")
-      .list(folderPath, {
-        sortBy: { column: "created_at", order: "desc" },
-      });
-
-    console.log("LIST DATA:", data);
-    console.log("LIST ERROR:", error);
-
-    if (error) throw error;
-
-    const csvFiles = (data || []).filter((f) => f.name.endsWith(".csv"));
-    console.log("CSV FILES:", csvFiles);
-
-    if (csvFiles.length === 0) {
-      alert("No CSV files found.");
-      return;
-    }
-
-    const latestFile = csvFiles[0];
-    console.log("Found newest CSV:", latestFile.name);
-
-    const { data: blob, error: downloadError } = await supabase.storage
-      .from("focus_scores")
-      .download(`${folderPath}/${latestFile.name}`);
-
-    console.log("DOWNLOAD ERROR:", downloadError);
-    console.log("BLOB:", blob);
-
-    if (downloadError || !blob) throw downloadError || new Error("No blob returned");
-
-    const csvText = await blob.text();
-    console.log("CSV HEAD:", csvText.slice(0, 300));
-
-    const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
-    console.log("baseline_mean_focus:", baseline_mean_focus);
-
-    const plan = generateRuleBasedPlan(baseline_mean_focus);
-    console.log("PLAN:", plan);
-
-    addPlannedMinutesForToday(plan.totalDuration);
-    onCompleteRef.current(plan);
-  } catch (err: any) {
-    console.error("Failed to check results:", err);
-    alert("Error fetching results: " + err.message);
-  } finally {
-    setIsChecking(false);
-  }
-};
 
   const startRecording = () => {
     if (!museConnected) {
@@ -408,7 +439,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     fullSessionRef.current = [];
 
     setIsAnalyzing(false);
-    setUploadComplete(false);
     setIsRecording(true);
   };
 
@@ -438,7 +468,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
             {!isRecording && !isAnalyzing && "Ready to Record"}
             {isRecording && "Recording in Progress..."}
-            {isAnalyzing && "Data Recorded Successfully"}
+            {isAnalyzing && "Analyzing and Processing EEG..."}
           </h2>
 
           {isRecording && stageBanner && (
@@ -560,26 +590,14 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         )}
 
         {isAnalyzing && (
-          <div className="flex flex-col items-center gap-6 mt-6">
-            
-            <div className="text-center space-y-2">
-                {uploadComplete ? (
-                    <p className="text-green-600 font-semibold">✅ Raw data uploaded to Supabase</p>
-                ) : (
-                    <p className="text-gray-500 animate-pulse">Uploading raw data to Supabase...</p>
-                )}
-                <p className="text-gray-600 text-sm">Please run your Python processing scripts now.</p>
-            </div>
+          <div className="flex flex-col items-center gap-4">
+            <p className="text-gray-600 mb-4">Stay on this page for your personalised study plan!</p>
 
-            <button
-                onClick={handleCheckResults}
-                disabled={!uploadComplete || isChecking}
-                className="flex items-center gap-2 px-8 py-4 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:bg-indigo-300 transition-all shadow-md"
-            >
-                <RefreshCw className={`w-5 h-5 ${isChecking ? "animate-spin" : ""}`} />
-                {isChecking ? "Checking for Results..." : "Get Results!"}
-            </button>
-            
+            <div className="flex gap-4">
+              <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+              <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+              <div className="w-3 h-3 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
           </div>
         )}
       </div>
