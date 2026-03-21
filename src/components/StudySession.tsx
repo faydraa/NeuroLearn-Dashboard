@@ -214,12 +214,17 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
         } = await supabase.auth.getUser();
 
         if (authError || !user) {
-          console.error("Upload blocked: User is not authenticated.", authError);
+          alert("Upload blocked: User is not authenticated.");
+          setIsUploading(false);
+          hasFinishedRef.current = false;
           return;
         }
 
+        // Catch empty data before trying to upload
         if (!sessionData || sessionData.length === 0) {
-          console.warn("No EEG samples recorded, so no CSV was uploaded.");
+          alert("No EEG data was recorded! Make sure the headset is connected and streaming before ending the session.");
+          setIsUploading(false);
+          hasFinishedRef.current = false;
           return;
         }
 
@@ -247,12 +252,19 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
           throw error;
         }
 
-        console.log(`Successfully uploaded study data to ${fileName}`);
-      } catch (err) {
-        console.error("Unexpected error during Supabase upload:", err);
-      } finally {
+        console.log(`✅ Successfully uploaded study data to ${fileName}`);
+        
+        // ONLY move forward if the upload actually succeeded!
         saveProgress(elapsedSeconds);
         onComplete();
+
+      } catch (err: any) {
+        console.error("Supabase upload error:", err);
+        alert("Failed to upload session data: " + err.message);
+        
+        // Reset the UI so you can see the error and try again
+        setIsUploading(false);
+        hasFinishedRef.current = false;
       }
     },
     [saveProgress, onComplete]
