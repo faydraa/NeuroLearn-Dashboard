@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 10 * 60; // Set to 10 for quick testing, 600 for real study
+const STUDYING_DURATION = 10 * 0; // Set to 10 for quick testing, 600 for real study
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
