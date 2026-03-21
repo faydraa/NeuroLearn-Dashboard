@@ -4,12 +4,10 @@ import type { StudyPlan } from "../App";
 import { MuseClient } from "muse-js";
 import type { SubscriptionLike } from "rxjs";
 import { supabase } from "../library/supabase";
-import pako from "pako";
 
 type StudySessionProps = {
   studyPlan: StudyPlan;
   onComplete: () => void;
-  userId: string;
 };
 
 type Notification = {
@@ -28,42 +26,29 @@ export type RawEEGSample = {
   accZ: number;
 };
 
-export function StudySession({ studyPlan, onComplete, userId }: StudySessionProps) {
+export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
+  // --- Timer & UI State ---
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [notification, setNotification] = useState<Notification | null>(null);
 
+  // --- Muse & Recording State ---
   const [museConnected, setMuseConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  const focusPercent = Math.round((studyPlan.baseline_mean_focus ?? 0.75) * 100);
+  const focusPercent = Math.round(((studyPlan.baseline_mean_focus ?? 0.75) * 100));
   const focusBandLabel = (studyPlan.focusBand ?? "unknown").replaceAll("_", " ");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const focusLevelRef = useRef(focusPercent);
 
+  // --- Muse Refs ---
   const eegSubRef = useRef<SubscriptionLike | null>(null);
   const accSubRef = useRef<SubscriptionLike | null>(null);
-
-  const latestRef = useRef<{
-    tp9?: number;
-    af7?: number;
-    af8?: number;
-    tp10?: number;
-    accX?: number;
-    accY?: number;
-    accZ?: number;
-  }>({});
-
+  const latestRef = useRef<{ tp9?: number; af7?: number; af8?: number; tp10?: number; accX?: number; accY?: number; accZ?: number; }>({});
   const isRecordingRef = useRef(false);
   const fullSessionRef = useRef<RawEEGSample[]>([]);
-  const hasFinishedRef = useRef(false);
-
-  // IMPORTANT:
-  // If your real bucket name is still raw_test_data, change this back to "raw_test_data".
-  // If you already renamed it to raw_eeg_data, keep this as "raw_eeg_data".
-  const STORAGE_BUCKET = "raw_test_data";
 
   useEffect(() => {
     focusLevelRef.current = focusPercent;
@@ -84,6 +69,7 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
     isRecordingRef.current = isRunning;
   }, [isRunning]);
 
+  // --- Muse Connection Logic ---
   const connectMuseWeb = async () => {
     if (!("bluetooth" in navigator)) {
       alert("Web Bluetooth is not supported on this browser.");
@@ -100,7 +86,6 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
       const accSub = client.accelerometerData.subscribe((reading: any) => {
         const last = reading.samples?.[reading.samples.length - 1];
         if (!last) return;
-
         latestRef.current.accX = last.x;
         latestRef.current.accY = last.y;
         latestRef.current.accZ = last.z;
@@ -171,13 +156,7 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
     const currentFocus = focusLevelRef.current;
 
     if (!progress[today]) {
-      progress[today] = {
-        completedMinutes: 0,
-        plannedMinutes: 0,
-        sessions: 0,
-        avgFocus: 0,
-        focusMinutes: 0,
-      };
+      progress[today] = { completedMinutes: 0, plannedMinutes: 0, sessions: 0, avgFocus: 0, focusMinutes: 0 };
     } else {
       if (progress[today].completedMinutes == null) progress[today].completedMinutes = progress[today].duration ?? 0;
       if (progress[today].plannedMinutes == null) progress[today].plannedMinutes = 0;
@@ -205,88 +184,6 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
     localStorage.setItem("studyProgress", JSON.stringify(progress));
   }, []);
 
-  const uploadStudySessionData = useCallback(
-    async (elapsedSeconds: number) => {
-      console.log("Step 1: Preparing to upload study session...");
-
-      try {
-        const sessionData = fullSessionRef.current;
-        console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
-
-        if (!userId) {
-          throw new Error("Missing userId");
-        }
-        console.log("Step 3: Using userId from props:", userId);
-
-        if (!sessionData || sessionData.length === 0) {
-          alert("No EEG data was recorded! Please make sure the headset is streaming before ending.");
-          setIsUploading(false);
-          hasFinishedRef.current = false;
-          return;
-        }
-
-        const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
-        const csvRows = [headers.join(",")];
-
-        sessionData.forEach((sample) => {
-          csvRows.push(
-            `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
-          );
-        });
-
-        const csvString = csvRows.join("\n");
-
-        // Compress CSV string → gzip
-        const compressed = pako.gzip(csvString);
-
-        // Convert to Blob
-        const blob = new Blob([compressed], { type: "application/gzip" });
-
-        // Change file extension
-        const fileName = `study session/${userId}/session_${Date.now()}.csv.gz`;
-
-        console.log("Compressed size (bytes):", blob.size);
-
-        console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
-
-        const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, blob, {
-          contentType: "application/gzip",
-          upsert: false,
-        });
-
-        if (error) {
-          console.error("Step 5 Error: Supabase rejected the upload!", error);
-          throw error;
-        }
-
-        console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
-
-        saveProgress(elapsedSeconds);
-        setIsUploading(false);
-        onComplete();
-      } catch (err: any) {
-        console.error("CRITICAL ERROR during upload:", err);
-        alert("Failed to upload session data: " + (err.message || JSON.stringify(err)));
-        setIsUploading(false);
-        hasFinishedRef.current = false;
-      }
-    },
-    [saveProgress, onComplete, userId]
-  );
-
-    const finalizeSession = useCallback(
-      async (elapsedSeconds: number) => {
-        if (hasFinishedRef.current) return;
-
-        hasFinishedRef.current = true;
-        setIsRunning(false);
-        setIsUploading(true);
-
-        await uploadStudySessionData(elapsedSeconds);
-      },
-      [uploadStudySessionData]
-    );
-
   const breaksSorted = useMemo(() => {
     return [...(studyPlan.breaks ?? [])].sort((a, b) => a.time - b.time);
   }, [studyPlan.breaks]);
@@ -299,10 +196,9 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
     return Coffee;
   };
 
+  // --- Timer & Upload Trigger ---
   useEffect(() => {
     if (!isRunning) return;
-
-    const totalSeconds = studyPlan.totalDuration * 60;
 
     const interval = setInterval(() => {
       setTimeElapsed((prev) => {
@@ -318,10 +214,9 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
           }
         });
 
-        if (newTime >= totalSeconds) {
-          clearInterval(interval);
-          void finalizeSession(totalSeconds);
-          return totalSeconds;
+        if (newTime >= studyPlan.totalDuration * 60) {
+          setIsRunning(false);
+          setIsUploading(true); // Trigger the Supabase upload
         }
 
         return newTime;
@@ -329,7 +224,68 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isRunning, breaksSorted, studyPlan.totalDuration, showNotification, playSound, finalizeSession]);
+  }, [isRunning, breaksSorted, studyPlan.totalDuration, showNotification, playSound]);
+
+  // --- Supabase Upload Logic ---
+  useEffect(() => {
+    if (!isUploading) return;
+
+    const uploadStudySessionData = async () => {
+      try {
+        const sessionData = fullSessionRef.current;
+        
+        // Even if empty, we should still save UI progress and finish
+        if (!sessionData || sessionData.length === 0) {
+          saveProgress(timeElapsed);
+          onComplete();
+          return;
+        }
+
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+        if (authError || !user) {
+          console.error("Upload blocked: User is not authenticated.");
+          saveProgress(timeElapsed);
+          onComplete();
+          return;
+        }
+
+        const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
+        const csvRows = [headers.join(",")];
+
+        sessionData.forEach((sample) => {
+          csvRows.push(`${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`);
+        });
+
+        const csvString = csvRows.join("\n");
+        const blob = new Blob([csvString], { type: "text/csv" });
+        
+        // Save to the study session folder
+        const fileName = `study session/${user.id}_session_${Date.now()}.csv`;
+
+        const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
+          contentType: "text/csv",
+        });
+
+        if (error) {
+          console.error("Failed to upload study session data:", error.message);
+        } else {
+          console.log(`Successfully uploaded study data to ${fileName}`);
+        }
+
+        // Finish up regardless of upload success
+        saveProgress(timeElapsed);
+        onComplete();
+        
+      } catch (err) {
+        console.error("Unexpected error during Supabase upload:", err);
+        saveProgress(timeElapsed);
+        onComplete();
+      }
+    };
+
+    uploadStudySessionData();
+  }, [isUploading, timeElapsed, saveProgress, onComplete]);
 
   const formatTime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
@@ -405,13 +361,7 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
                 </button>
               ) : !isRunning ? (
                 <button
-                  onClick={() => {
-                    if (timeElapsed === 0) {
-                      fullSessionRef.current = [];
-                      hasFinishedRef.current = false;
-                    }
-                    setIsRunning(true);
-                  }}
+                  onClick={() => setIsRunning(true)}
                   className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition"
                 >
                   <Play className="w-5 h-5" />
@@ -428,8 +378,11 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
               )}
 
               <button
-                onClick={() => void finalizeSession(timeElapsed)}
-                disabled={(!museConnected && timeElapsed === 0) || isUploading}
+                onClick={() => {
+                  setIsRunning(false);
+                  setIsUploading(true); // End early and upload data
+                }}
+                disabled={!museConnected && timeElapsed === 0}
                 className="flex items-center gap-2 bg-gray-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-gray-700 transition disabled:opacity-50"
               >
                 <Square className="w-5 h-5" />
@@ -445,9 +398,7 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
                 <div className={`text-4xl font-bold ${focusColor}`}>{focusPercent}%</div>
                 <p className="text-xs text-gray-600 mt-1 capitalize">{focusBandLabel}</p>
                 {typeof studyPlan.baseline_mean_focus === "number" && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Mean p_focus_smoothed: {studyPlan.baseline_mean_focus.toFixed(3)}
-                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Mean p_focus_smoothed: {studyPlan.baseline_mean_focus.toFixed(3)}</p>
                 )}
               </div>
               <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
