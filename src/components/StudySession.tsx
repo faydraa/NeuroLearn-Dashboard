@@ -4,6 +4,7 @@ import type { StudyPlan } from "../App";
 import { MuseClient } from "muse-js";
 import type { SubscriptionLike } from "rxjs";
 import { supabase } from "../library/supabase";
+import pako from "pako";
 
 type StudySessionProps = {
   studyPlan: StudyPlan;
@@ -234,13 +235,22 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
         });
 
         const csvString = csvRows.join("\n");
-        const blob = new Blob([csvString], { type: "text/csv" });
 
-        const fileName = `study session/${userId}/session_${Date.now()}.csv`;
+        // Compress CSV string → gzip
+        const compressed = pako.gzip(csvString);
+
+        // Convert to Blob
+        const blob = new Blob([compressed], { type: "application/gzip" });
+
+        // Change file extension
+        const fileName = `study session/${userId}/session_${Date.now()}.csv.gz`;
+
+        console.log("Compressed size (bytes):", blob.size);
+
         console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
 
         const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, blob, {
-          contentType: "text/csv",
+          contentType: "application/gzip",
           upsert: false,
         });
 
@@ -252,6 +262,7 @@ export function StudySession({ studyPlan, onComplete, userId }: StudySessionProp
         console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
 
         saveProgress(elapsedSeconds);
+        setIsUploading(false);
         onComplete();
       } catch (err: any) {
         console.error("CRITICAL ERROR during upload:", err);
