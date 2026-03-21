@@ -8,6 +8,7 @@ import { supabase } from "../library/supabase";
 type StudySessionProps = {
   studyPlan: StudyPlan;
   onComplete: () => void;
+  userId: string;
 };
 
 type Notification = {
@@ -26,7 +27,7 @@ export type RawEEGSample = {
   accZ: number;
 };
 
-export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
+export function StudySession({ studyPlan, onComplete, userId }: StudySessionProps) {
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [notification, setNotification] = useState<Notification | null>(null);
@@ -57,6 +58,11 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
   const isRecordingRef = useRef(false);
   const fullSessionRef = useRef<RawEEGSample[]>([]);
   const hasFinishedRef = useRef(false);
+
+  // IMPORTANT:
+  // If your real bucket name is still raw_test_data, change this back to "raw_test_data".
+  // If you already renamed it to raw_eeg_data, keep this as "raw_eeg_data".
+  const STORAGE_BUCKET = "raw_test_data";
 
   useEffect(() => {
     focusLevelRef.current = focusPercent;
@@ -199,95 +205,76 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
   }, []);
 
   const uploadStudySessionData = useCallback(
-  async (elapsedSeconds: number) => {
-    console.log("Step 1: Preparing to upload study session...");
+    async (elapsedSeconds: number) => {
+      console.log("Step 1: Preparing to upload study session...");
 
-    try {
-      const sessionData = fullSessionRef.current;
-      console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
+      try {
+        const sessionData = fullSessionRef.current;
+        console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
 
-      // ⬇️ PUT TIMEOUT CODE HERE
-      const sessionResult: any = await Promise.race([
-        supabase.auth.getSession(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Auth request timed out")), 8000)
-        ),
-      ]);
+        if (!userId) {
+          throw new Error("Missing userId");
+        }
+        console.log("Step 3: Using userId from props:", userId);
 
-      const session = sessionResult?.data?.session ?? null;
-      const user = session?.user ?? null;
+        if (!sessionData || sessionData.length === 0) {
+          alert("No EEG data was recorded! Please make sure the headset is streaming before ending.");
+          setIsUploading(false);
+          hasFinishedRef.current = false;
+          return;
+        }
 
-      console.log("Auth result:", sessionResult);
+        const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
+        const csvRows = [headers.join(",")];
 
-      if (!user) {
-        throw new Error("No authenticated session found");
-      }
+        sessionData.forEach((sample) => {
+          csvRows.push(
+            `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
+          );
+        });
 
-      console.log("Step 3: Authenticated as user:", user.id);
+        const csvString = csvRows.join("\n");
+        const blob = new Blob([csvString], { type: "text/csv" });
 
-      if (!sessionData || sessionData.length === 0) {
-        throw new Error("No EEG data was recorded");
-      }
+        const fileName = `study session/${userId}/session_${Date.now()}.csv`;
+        console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
 
-      const headers = [
-        "timestamp",
-        "eeg_1",
-        "eeg_2",
-        "eeg_3",
-        "eeg_4",
-        "acc_1",
-        "acc_2",
-        "acc_3",
-      ];
-      const csvRows = [headers.join(",")];
-
-      sessionData.forEach((sample) => {
-        csvRows.push(
-          `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
-        );
-      });
-
-      const csvString = csvRows.join("\n");
-      const blob = new Blob([csvString], { type: "text/csv" });
-
-      const fileName = `study session/${user.id}/session_${Date.now()}.csv`;
-      console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
-
-      const { error } = await supabase.storage
-        .from("raw_test_data")
-        .upload(fileName, blob, {
+        const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, blob, {
           contentType: "text/csv",
           upsert: false,
         });
 
-      if (error) throw error;
+        if (error) {
+          console.error("Step 5 Error: Supabase rejected the upload!", error);
+          throw error;
+        }
 
-      console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
+        console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
 
-      saveProgress(elapsedSeconds);
-      onComplete();
-    } catch (err: any) {
-      console.error("CRITICAL ERROR during upload:", err);
-      alert("Failed to upload session data: " + (err?.message || String(err)));
-      setIsUploading(false);
-      hasFinishedRef.current = false;
-    }
-  },
-  [saveProgress, onComplete]
-);
-
-  const finalizeSession = useCallback(
-    async (elapsedSeconds: number) => {
-      if (hasFinishedRef.current) return;
-
-      hasFinishedRef.current = true;
-      setIsRunning(false);
-      setIsUploading(true);
-
-      await uploadStudySessionData(elapsedSeconds);
+        saveProgress(elapsedSeconds);
+        onComplete();
+      } catch (err: any) {
+        console.error("CRITICAL ERROR during upload:", err);
+        alert("Failed to upload session data: " + (err.message || JSON.stringify(err)));
+        setIsUploading(false);
+        hasFinishedRef.current = false;
+      }
     },
-    [uploadStudySessionData]
+    [saveProgress, onComplete, userId]
   );
+
+    const finalizeSession = useCallback(
+      async (elapsedSeconds: number) => {
+        if (hasFinishedRef.current) return;
+
+        hasFinishedRef.current = true;
+        setIsRunning(false);
+        setIsUploading(true);
+
+        await uploadStudySessionData(elapsedSeconds);
+      },
+      [uploadStudySessionData]
+    );
 
   const breaksSorted = useMemo(() => {
     return [...(studyPlan.breaks ?? [])].sort((a, b) => a.time - b.time);
