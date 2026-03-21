@@ -205,24 +205,25 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
 
   const uploadStudySessionData = useCallback(
     async (elapsedSeconds: number) => {
+      console.log("Step 1: Preparing to upload study session...");
+      
       try {
         const sessionData = fullSessionRef.current;
+        console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
 
-        const {
-          data: { user },
-          error: authError,
-        } = await supabase.auth.getUser();
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
 
         if (authError || !user) {
-          alert("Upload blocked: User is not authenticated.");
+          console.error("Auth Error:", authError);
+          alert("Upload blocked: You are not logged in.");
           setIsUploading(false);
           hasFinishedRef.current = false;
           return;
         }
+        console.log("Step 3: Authenticated as user:", user.id);
 
-        // Catch empty data before trying to upload
         if (!sessionData || sessionData.length === 0) {
-          alert("No EEG data was recorded! Make sure the headset is connected and streaming before ending the session.");
+          alert("No EEG data was recorded! Please make sure the headset is streaming before ending.");
           setIsUploading(false);
           hasFinishedRef.current = false;
           return;
@@ -240,8 +241,8 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
         const csvString = csvRows.join("\n");
         const blob = new Blob([csvString], { type: "text/csv" });
 
-        // This creates: study session/{user.id}/session_xxx.csv
         const fileName = `study session/${user.id}/session_${Date.now()}.csv`;
+        console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
 
         const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, blob, {
           contentType: "text/csv",
@@ -249,20 +250,21 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
         });
 
         if (error) {
+          console.error("Step 5 Error: Supabase rejected the upload!", error);
           throw error;
         }
 
-        console.log(`✅ Successfully uploaded study data to ${fileName}`);
+        console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
         
         // ONLY move forward if the upload actually succeeded!
         saveProgress(elapsedSeconds);
         onComplete();
 
       } catch (err: any) {
-        console.error("Supabase upload error:", err);
-        alert("Failed to upload session data: " + err.message);
+        console.error("CRITICAL ERROR during upload:", err);
+        alert("Failed to upload session data: " + (err.message || JSON.stringify(err)));
         
-        // Reset the UI so you can see the error and try again
+        // Unfreeze the UI so you can try again
         setIsUploading(false);
         hasFinishedRef.current = false;
       }
