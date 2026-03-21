@@ -374,7 +374,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
               const latestFile = csvFiles[0];
               console.log("👀 Found newest CSV:", latestFile.name);
 
-              // Download the file
+              // Download the file (Time check removed so it triggers instantly)
               const { data: blob, error: downloadError } = await supabase.storage
                 .from("focus_scores")
                 .download(`${folderPath}/${latestFile.name}`);
@@ -383,20 +383,20 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                 console.error("❌ Download error:", downloadError);
               } else if (blob) {
                 csvText = await blob.text();
-                console.log("✅ Successfully downloaded and read the CSV!");
-                break; // File found! Exit the infinite loop
+                console.log("✅ Successfully downloaded! Auto-redirecting now...");
+                break; // Exit the loop and automatically move to the next page!
               }
             } else {
-               console.log("Waiting for .csv file... (Only found folders/placeholders)");
+               // Log exactly what React sees in the folder
+               console.log("Waiting... React sees these files:", data.map(f => f.name));
             }
           } else {
-             console.log("Waiting for file... (Folder is empty)");
+             console.log("Waiting for file... (Folder is completely empty)");
           }
           
           // Wait 3 seconds before checking again
           await sleep(3000); 
         }
-
         if (cancelled) return;
 
         if (!csvText) {
