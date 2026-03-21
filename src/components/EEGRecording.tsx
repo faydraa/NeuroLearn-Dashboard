@@ -24,10 +24,10 @@ export type RawEEGSample = {
 };
 
 type RecordingStage = "eyesClosed" | "studying";
+type SessionFolder = "baseline" | "study session";
 
-// Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 10 * 0; // Set to 10 for quick testing, 600 for real study
+const STUDYING_DURATION = 10 * 0; // baseline test version
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -39,7 +39,6 @@ function formatMMSS(totalSeconds: number) {
   return `${mm}:${ss}`;
 }
 
-// add today's planned minutes
 function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   const today = new Date().toISOString().split("T")[0];
   const existing = localStorage.getItem("studyProgress");
@@ -63,7 +62,6 @@ function addPlannedMinutesForToday(plannedMinutesToAdd: number) {
   localStorage.setItem("studyProgress", JSON.stringify(progress));
 }
 
-// Mean of a CSV column (p_focus_smoothed)
 function meanOfColumn(csvText: string, columnName: string): number {
   const lines = csvText.trim().split(/\r?\n/);
   if (lines.length < 2) throw new Error("CSV has no data rows.");
@@ -93,8 +91,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
   const [isRecording, setIsRecording] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isChecking, setIsChecking] = useState(false); // New state for our manual button
-  const [uploadComplete, setUploadComplete] = useState(false); // Track if raw data finished uploading
+  const [isChecking, setIsChecking] = useState(false);
+  const [uploadComplete, setUploadComplete] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
   const [recordingStage, setRecordingStage] = useState<RecordingStage>("eyesClosed");
@@ -106,16 +105,20 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
   const eegSubRef = useRef<SubscriptionLike | null>(null);
   const accSubRef = useRef<SubscriptionLike | null>(null);
-  
-  const latestRef = useRef<{ 
-    tp9?: number; af7?: number; af8?: number; tp10?: number;
-    accX?: number; accY?: number; accZ?: number;
-  }>({});
-  const isRecordingRef = useRef(false);
 
+  const latestRef = useRef<{
+    tp9?: number;
+    af7?: number;
+    af8?: number;
+    tp10?: number;
+    accX?: number;
+    accY?: number;
+    accZ?: number;
+  }>({});
+
+  const isRecordingRef = useRef(false);
   const bufferRef = useRef<RawEEGSample[]>([]);
   const rafIdRef = useRef<number | null>(null);
-
   const fullSessionRef = useRef<RawEEGSample[]>([]);
   const startTimeRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -134,24 +137,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       eegSubRef.current?.unsubscribe();
       accSubRef.current?.unsubscribe();
 
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-      }
-
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
     };
   }, []);
 
   const flushToState = useCallback(() => {
     rafIdRef.current = null;
 
-    if (!isRecordingRef.current) {
-      bufferRef.current = [];
-      return;
-    }
-
+    if (!isRecordingRef.current) return;
     if (bufferRef.current.length === 0) return;
 
     const toAdd = bufferRef.current;
@@ -165,6 +159,97 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       return updated;
     });
   }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const uploadEEGData = useCallback(async (folder: SessionFolder) => {
+    const sessionData = fullSessionRef.current;
+
+    if (!sessionData || sessionData.length === 0) {
+      throw new Error("No EEG samples were recorded.");
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      throw new Error("User is not authenticated.");
+    }
+
+    const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
+    const csvRows = [headers.join(",")];
+
+    sessionData.forEach((sample) => {
+      csvRows.push(
+        `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
+      );
+    });
+
+    const csvString = csvRows.join("\n");
+    const blob = new Blob([csvString], { type: "text/csv" });
+
+    const fileName = `${folder}/${user.id}/session_${Date.now()}.csv`;
+
+    const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
+      contentType: "text/csv",
+      upsert: false,
+    });
+
+    if (error) throw error;
+
+    console.log(`Successfully uploaded raw file to ${fileName}`);
+    return fileName;
+  }, []);
+
+  const finishRecording = useCallback(
+    async (folder: SessionFolder, goToAnalyzing = false) => {
+      stopTimer();
+      setStageBanner(null);
+
+      isRecordingRef.current = false;
+      setIsRecording(false);
+
+      if (rafIdRef.current != null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+
+      if (bufferRef.current.length > 0) {
+        const toAdd = bufferRef.current;
+        bufferRef.current = [];
+
+        setWaveformData((prev) => {
+          const updated = [...prev, ...toAdd];
+          if (updated.length > MAX_POINTS) {
+            updated.splice(0, updated.length - MAX_POINTS);
+          }
+          return updated;
+        });
+      }
+
+      setIsUploading(true);
+      setUploadComplete(false);
+
+      try {
+        await uploadEEGData(folder);
+        setUploadComplete(true);
+        if (goToAnalyzing) setIsAnalyzing(true);
+      } catch (err: any) {
+        console.error("Upload failed:", err);
+        alert("Failed to upload EEG CSV: " + (err?.message || String(err)));
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [stopTimer, uploadEEGData]
+  );
 
   const connectMuseWeb = async () => {
     if (!("bluetooth" in navigator)) {
@@ -182,7 +267,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       const accSub = client.accelerometerData.subscribe((reading: any) => {
         const last = reading.samples?.[reading.samples.length - 1];
         if (!last) return;
-        
+
         latestRef.current.accX = last.x;
         latestRef.current.accY = last.y;
         latestRef.current.accZ = last.z;
@@ -200,7 +285,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         if (!isRecordingRef.current) return;
 
         const { tp9, af7, af8, tp10, accX, accY, accZ } = latestRef.current;
-        
         if ([tp9, af7, af8, tp10, accX, accY, accZ].some((v) => typeof v !== "number")) return;
 
         const sample: RawEEGSample = {
@@ -209,9 +293,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           af7: af7 as number,
           af8: af8 as number,
           tp10: tp10 as number,
-          accX: accX as number, 
-          accY: accY as number, 
-          accZ: accZ as number, 
+          accX: accX as number,
+          accY: accY as number,
+          accZ: accZ as number,
         };
 
         fullSessionRef.current.push(sample);
@@ -224,7 +308,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
       eegSubRef.current?.unsubscribe();
       accSubRef.current?.unsubscribe();
-
       eegSubRef.current = sub;
       accSubRef.current = accSub;
 
@@ -249,9 +332,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     setStageBanner("Close your eyes and relax for 1 minute.");
     window.setTimeout(() => setStageBanner(null), 5000);
 
-    if (timerRef.current) {
-      window.clearInterval(timerRef.current);
-    }
+    stopTimer();
 
     timerRef.current = window.setInterval(() => {
       const elapsed = (Date.now() - (startTimeRef.current ?? Date.now())) / 1000;
@@ -269,90 +350,33 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       setProgress(pct);
 
       if (pct >= 100) {
-        setStageBanner(null);
-        setIsRecording(false);
-        setIsAnalyzing(true);
-
-        if (timerRef.current) {
-          window.clearInterval(timerRef.current);
-        }
-        timerRef.current = null;
+        void finishRecording("baseline", true);
       }
     }, 200);
 
     return () => {
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-      }
-      timerRef.current = null;
+      stopTimer();
     };
-  }, [isRecording]);
+  }, [isRecording, finishRecording, stopTimer]);
 
-  // Upload Effect: ONLY handles the upload now, no more polling loops!
-  useEffect(() => {
-    if (!isAnalyzing) return;
-    let cancelled = false;
-
-    const uploadEEGData = async () => {
-      try {
-        const sessionData = fullSessionRef.current;
-        if (!sessionData || sessionData.length === 0) return;
-
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
-        const csvRows = [headers.join(",")];
-
-        sessionData.forEach((sample) => {
-          csvRows.push(`${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`);
-        });
-
-        const csvString = csvRows.join("\n");
-        const blob = new Blob([csvString], { type: "text/csv" });
-        
-        const fileName = `baseline/${user.id}/session_${Date.now()}.csv`;
-
-        const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
-          contentType: "text/csv",
-        });
-
-        if (!error && !cancelled) {
-          console.log(`Successfully uploaded raw file to ${fileName}`);
-          setUploadComplete(true);
-        }
-      } catch (err) {
-        console.error("Upload failed:", err);
-      }
-    };
-
-    uploadEEGData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAnalyzing]);
-
-  // MANUAL BUTTON FETCH LOGIC
   const handleCheckResults = async () => {
     setIsChecking(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) throw new Error("User not found");
 
       const folderPath = `baseline/${user.id}`;
-      
-      // Look for the newest file in the baseline folder
-      const { data, error } = await supabase.storage
-        .from("focus_scores")
-        .list(folderPath, {
-          sortBy: { column: 'created_at', order: 'desc' },
-        });
+
+      const { data, error } = await supabase.storage.from("focus_scores").list(folderPath, {
+        sortBy: { column: "created_at", order: "desc" },
+      });
 
       if (error) throw error;
 
-      // Filter for CSVs
-      const csvFiles = data?.filter(f => f.name.endsWith(".csv")) || [];
+      const csvFiles = data?.filter((f) => f.name.endsWith(".csv")) || [];
 
       if (csvFiles.length === 0) {
         alert("Results not found yet. Make sure your Python processing scripts have finished running, then try again.");
@@ -360,9 +384,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         return;
       }
 
-      // Grab the absolute newest CSV file it finds
       const latestFile = csvFiles[0];
-      console.log("Found newest CSV:", latestFile.name);
 
       const { data: blob, error: downloadError } = await supabase.storage
         .from("focus_scores")
@@ -370,14 +392,12 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
       if (downloadError || !blob) throw downloadError;
 
-      // Process and complete!
       const csvText = await blob.text();
       const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
       const plan = generateRuleBasedPlan(baseline_mean_focus);
-      
+
       addPlannedMinutesForToday(plan.totalDuration);
       onCompleteRef.current(plan);
-
     } catch (err: any) {
       console.error("Failed to check results:", err);
       alert("Error fetching results: " + err.message);
@@ -397,7 +417,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
     setIsAnalyzing(false);
     setUploadComplete(false);
+    setIsUploading(false);
     setIsRecording(true);
+  };
+
+  // use this in your STUDY SESSION page
+  const handleEndSession = async () => {
+    if (!isRecording) return;
+    await finishRecording("study session", false);
+    alert("Study session ended and raw EEG data was saved.");
   };
 
   const totalRemaining = RECORDING_DURATION - elapsedSec;
@@ -406,138 +434,20 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">EEG Recording Session</h1>
-        <p className="text-gray-600">Analysing brainwave patterns to create your personalised study plan</p>
-      </div>
+      {/* existing JSX stays the same */}
 
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-24 h-24 bg-indigo-100 rounded-full mb-4 relative">
-            <Brain className="w-12 h-12 text-indigo-600" />
-            {isRecording && (
-              <span className="absolute top-0 right-0 flex h-4 w-4">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500"></span>
-              </span>
-            )}
-          </div>
+      {!isRecording && !isAnalyzing && museConnected && (
+        <button
+          onClick={startRecording}
+          className="w-full bg-indigo-600 text-white py-4 rounded-xl font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
+        >
+          <Activity className="w-5 h-5" />
+          Start Recording
+        </button>
+      )}
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            {!isRecording && !isAnalyzing && "Ready to Record"}
-            {isRecording && "Recording in Progress..."}
-            {isAnalyzing && "Data Recorded Successfully"}
-          </h2>
-
-          {isRecording && stageBanner && (
-            <div className="mt-4 mx-auto max-w-xl bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-4 py-3 text-sm text-left">
-              <span className="font-semibold">Instruction:</span> {stageBanner}
-            </div>
-          )}
-
-          {!isRecording && !isAnalyzing && (
-            <div className="space-y-4">
-              <p className="text-sm">
-                <span className={`font-bold ${museConnected ? "text-green-600" : "text-red-600"}`}>
-                  {museConnected ? "● Muse Connected" : "○ Muse Not Connected"}
-                </span>
-              </p>
-
-              {!museConnected ? (
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 text-left">
-                  <h2 className="text-lg font-bold text-gray-900 mb-2">Connect your Muse 2</h2>
-                  <p className="text-gray-600 text-sm mb-4">
-                    When you click the button, your browser will open a secure Bluetooth pairing window. Select your available Muse
-                    device to pair.
-                  </p>
-
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900 mb-4">
-                    <p className="font-semibold mb-2">Before pairing:</p>
-                    <ul className="list-disc ml-5 space-y-1">
-                      <li>Turn on Muse 2 (LED blinking)</li>
-                      <li>Use Chrome / Microsoft Edge desktop (Bluetooth Supported)</li>
-                    </ul>
-                  </div>
-
-                  <button
-                    onClick={connectMuseWeb}
-                    disabled={isConnecting}
-                    className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:bg-gray-400 transition"
-                  >
-                    {isConnecting ? "Opening Bluetooth Window..." : "Connect Muse Device"}
-                  </button>
-                </div>
-              ) : (
-                <p className="text-gray-600">Muse is connected. You can start recording anytime.</p>
-              )}
-
-              {museConnected && (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-left">
-                  <h3 className="font-bold text-blue-900 mb-3">Recording Instructions:</h3>
-                  <ul className="space-y-2 text-blue-800 text-sm">
-                    <li className="flex items-start gap-2">
-                      <span className="font-bold">1.</span>
-                      <span>Ensure all 4 electrodes make good contact with your forehead/ears</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="font-bold">2.</span>
-                      <span>Stay relaxed and minimise head movements during recording</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="font-bold">3.</span>
-                      <span>
-                        The recording will last <span className="font-semibold">11 minutes</span>:
-                        <span className="block mt-1">
-                          • <span className="font-semibold">First Minute:</span> Close your eyes and relax
-                        </span>
-                        <span className="block">
-                          • <span className="font-semibold">Last 10 Minutes:</span> Start studying normally
-                        </span>
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="font-bold">4.</span>
-                      <span>Before recording... Take a deep breath and relax for 1 minute</span>
-                    </li>
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {isRecording && (
-          <div className="mb-8">
-            <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-
-            <p className="text-center text-sm text-gray-600 mt-2">
-              {isRecording && (
-                <>
-                  <span className="font-semibold">{recordingStage === "eyesClosed" ? "Eyes closed" : "Studying"}</span>
-                  {` • ${Math.round(progress)}% • ${formatMMSS(totalRemaining)} remaining`}
-                  {recordingStage === "eyesClosed" && <> {` • switch in ${formatMMSS(stageRemaining)}`}</>}
-                </>
-              )}
-            </p>
-          </div>
-        )}
-
-        {!isRecording && !isAnalyzing && museConnected && (
-          <button
-            onClick={startRecording}
-            className="w-full bg-indigo-600 text-white py-4 rounded-xl font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
-          >
-            <Activity className="w-5 h-5" />
-            Start Recording
-          </button>
-        )}
-
-        {isRecording && (
+      {isRecording && (
+        <>
           <div className="mt-8">
             {waveformData.length === 0 ? (
               <div className="text-center py-10 text-gray-500 text-sm">Waiting for EEG stream...</div>
@@ -545,40 +455,36 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
               <EEGWaveform waveformData={waveformData} />
             )}
           </div>
-        )}
 
-        {isAnalyzing && (
-          <div className="flex flex-col items-center gap-6 mt-6">
-            
-            <div className="text-center space-y-2">
-                {uploadComplete ? (
-                    <p className="text-green-600 font-semibold">✅ Raw data uploaded to Supabase</p>
-                ) : (
-                    <p className="text-gray-500 animate-pulse">Uploading raw data to Supabase...</p>
-                )}
-                <p className="text-gray-600 text-sm">Please run your Python processing scripts now.</p>
-            </div>
-
-            <button
-                onClick={handleCheckResults}
-                disabled={!uploadComplete || isChecking}
-                className="flex items-center gap-2 px-8 py-4 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:bg-indigo-300 transition-all shadow-md"
-            >
-                <RefreshCw className={`w-5 h-5 ${isChecking ? "animate-spin" : ""}`} />
-                {isChecking ? "Checking for Results..." : "I've run the scripts - Get Results!"}
-            </button>
-            
-          </div>
-        )}
-      </div>
+          <button
+            onClick={handleEndSession}
+            disabled={isUploading}
+            className="w-full mt-4 bg-red-600 text-white py-3 rounded-xl font-medium hover:bg-red-700 disabled:bg-red-300 transition"
+          >
+            {isUploading ? "Saving Session..." : "End Session"}
+          </button>
+        </>
+      )}
 
       {isAnalyzing && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-6 py-4 text-sm flex items-start gap-3">
-          <AlertTriangle className="w-9 h-9 mt-0.5 text-amber-700" />
-          <div>
-            <p className="font-bold">Important!</p>
-            <p>Please do not remove the Muse headset. Continue to wear it for your study session.</p>
+        <div className="flex flex-col items-center gap-6 mt-6">
+          <div className="text-center space-y-2">
+            {uploadComplete ? (
+              <p className="text-green-600 font-semibold">✅ Raw data uploaded to Supabase</p>
+            ) : (
+              <p className="text-gray-500 animate-pulse">Uploading raw data to Supabase...</p>
+            )}
+            <p className="text-gray-600 text-sm">Please run your Python processing scripts now.</p>
           </div>
+
+          <button
+            onClick={handleCheckResults}
+            disabled={!uploadComplete || isChecking}
+            className="flex items-center gap-2 px-8 py-4 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:bg-indigo-300 transition-all shadow-md"
+          >
+            <RefreshCw className={`w-5 h-5 ${isChecking ? "animate-spin" : ""}`} />
+            {isChecking ? "Checking for Results..." : "I've run the scripts - Get Results!"}
+          </button>
         </div>
       )}
     </div>
