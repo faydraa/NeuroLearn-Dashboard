@@ -61,7 +61,7 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
   // IMPORTANT:
   // If your real bucket name is still raw_test_data, change this back to "raw_test_data".
   // If you already renamed it to raw_eeg_data, keep this as "raw_eeg_data".
-  const STORAGE_BUCKET = "raw_eeg_data";
+  const STORAGE_BUCKET = "raw_test_data";
 
   useEffect(() => {
     focusLevelRef.current = focusPercent;
