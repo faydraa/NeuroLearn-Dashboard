@@ -206,29 +206,25 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
       const sessionData = fullSessionRef.current;
       console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
 
-      // ✅ STEP 1: Try cached session first (FAST, no network)
-const {
-  data: { session },
-} = await supabase.auth.getSession();
+      // ⬇️ PUT TIMEOUT CODE HERE
+      const sessionResult: any = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Auth request timed out")), 8000)
+        ),
+      ]);
 
-let user = session?.user ?? null;
+      const session = sessionResult?.data?.session ?? null;
+      const user = session?.user ?? null;
 
-      // ✅ STEP 2: Fallback ONLY if needed
-      if (!user) {
-        console.log("No session found, falling back to getUser()...");
-
-        const { data, error } = await supabase.auth.getUser();
-
-        if (error) throw error;
-        user = data.user;
-      }
+      console.log("Auth result:", sessionResult);
 
       if (!user) {
-        throw new Error("User not authenticated");
+        throw new Error("No authenticated session found");
       }
 
-      console.log("Authenticated user:", user.id);
-      
+      console.log("Step 3: Authenticated as user:", user.id);
+
       if (!sessionData || sessionData.length === 0) {
         throw new Error("No EEG data was recorded");
       }
