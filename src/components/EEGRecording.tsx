@@ -489,15 +489,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 text-left">
                   <h2 className="text-lg font-bold text-gray-900 mb-2">Connect your Muse 2</h2>
                   <p className="text-gray-600 text-sm mb-4">
-                    When you click the button, your browser will open a secure Bluetooth pairing window. Select your Muse
-                    device there to continue.
+                    When you click the button, your browser will open a secure Bluetooth pairing window. Select your available Muse
+                    device to pair.
                   </p>
 
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900 mb-4">
                     <p className="font-semibold mb-2">Before pairing:</p>
                     <ul className="list-disc ml-5 space-y-1">
                       <li>Turn on Muse 2 (LED blinking)</li>
-                      <li>Use Chrome / Edge desktop (Bluetooth Supported)</li>
+                      <li>Use Chrome / Microsoft Edge desktop (Bluetooth Supported)</li>
                     </ul>
                   </div>
 
