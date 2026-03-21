@@ -58,11 +58,6 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
   const fullSessionRef = useRef<RawEEGSample[]>([]);
   const hasFinishedRef = useRef(false);
 
-  // IMPORTANT:
-  // If your real bucket name is still raw_test_data, change this back to "raw_test_data".
-  // If you already renamed it to raw_eeg_data, keep this as "raw_eeg_data".
-  const STORAGE_BUCKET = "raw_test_data";
-
   useEffect(() => {
     focusLevelRef.current = focusPercent;
   }, [focusPercent]);
@@ -204,73 +199,87 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
   }, []);
 
   const uploadStudySessionData = useCallback(
-    async (elapsedSeconds: number) => {
-      console.log("Step 1: Preparing to upload study session...");
-      
-      try {
-        const sessionData = fullSessionRef.current;
-        console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
+  async (elapsedSeconds: number) => {
+    setIsUploading(true);
 
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+    try {
+      const sessionData = fullSessionRef.current;
 
-        if (authError || !user) {
-          console.error("Auth Error:", authError);
-          alert("Upload blocked: You are not logged in.");
-          setIsUploading(false);
-          hasFinishedRef.current = false;
-          return;
-        }
-        console.log("Step 3: Authenticated as user:", user.id);
+      console.log("Uploading study session...");
+      console.log("Samples collected:", sessionData?.length);
 
-        if (!sessionData || sessionData.length === 0) {
-          alert("No EEG data was recorded! Please make sure the headset is streaming before ending.");
-          setIsUploading(false);
-          hasFinishedRef.current = false;
-          return;
-        }
+      // 🔐 Get authenticated user
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-        const headers = ["timestamp", "eeg_1", "eeg_2", "eeg_3", "eeg_4", "acc_1", "acc_2", "acc_3"];
-        const csvRows = [headers.join(",")];
+      console.log("User:", user);
 
-        sessionData.forEach((sample) => {
-          csvRows.push(
-            `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
-          );
-        });
+      if (authError || !user) {
+        alert("Upload blocked: You are not logged in.");
+        throw new Error("User not authenticated");
+      }
 
-        const csvString = csvRows.join("\n");
-        const blob = new Blob([csvString], { type: "text/csv" });
+      if (!sessionData || sessionData.length === 0) {
+        alert("No EEG data recorded.");
+        throw new Error("Empty session data");
+      }
 
-        const fileName = `study session/${user.id}/session_${Date.now()}.csv`;
-        console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
+      // 📄 Convert to CSV (same format as baseline)
+      const headers = [
+        "timestamp",
+        "tp9",
+        "af7",
+        "af8",
+        "tp10",
+        "accX",
+        "accY",
+        "accZ",
+      ];
 
-        const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, blob, {
+      const csvRows = [headers.join(",")];
+
+      sessionData.forEach((sample) => {
+        csvRows.push(
+          `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
+        );
+      });
+
+      const csvString = csvRows.join("\n");
+      const blob = new Blob([csvString], { type: "text/csv" });
+
+      // 📁 EXACT REQUIRED PATH
+      const filePath = `study session/${user.id}/session_${Date.now()}.csv`;
+
+      console.log("Uploading to:", filePath);
+
+      const { error: uploadError } = await supabase.storage
+        .from("raw_test_data")
+        .upload(filePath, blob, {
           contentType: "text/csv",
           upsert: false,
         });
 
-        if (error) {
-          console.error("Step 5 Error: Supabase rejected the upload!", error);
-          throw error;
-        }
+      if (uploadError) throw uploadError;
 
-        console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
-        
-        // ONLY move forward if the upload actually succeeded!
-        saveProgress(elapsedSeconds);
-        onComplete();
+      console.log("✅ Study session uploaded successfully");
 
-      } catch (err: any) {
-        console.error("CRITICAL ERROR during upload:", err);
-        alert("Failed to upload session data: " + (err.message || JSON.stringify(err)));
-        
-        // Unfreeze the UI so you can try again
-        setIsUploading(false);
-        hasFinishedRef.current = false;
-      }
-    },
-    [saveProgress, onComplete]
-  );
+      // ✅ Same behaviour as baseline
+      saveProgress(elapsedSeconds);
+      onComplete();
+
+    } catch (err: any) {
+      console.error("❌ Upload failed:", err);
+      alert("Upload failed: " + (err.message || String(err)));
+
+      hasFinishedRef.current = false;
+    } finally {
+      setIsUploading(false);
+    }
+  },
+  [saveProgress, onComplete]
+);
 
   const finalizeSession = useCallback(
     async (elapsedSeconds: number) => {
