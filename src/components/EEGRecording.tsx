@@ -291,8 +291,11 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    
+    // 1. Capture the exact timestamp so we can perfectly predict the final file names
+    const sessionTimestamp = Date.now();
 
-    // 1. Export Raw EEG Data to Supabase
+    // 2. Export Raw EEG Data to Supabase
     const uploadEEGData = async (): Promise<boolean> => {
       try {
         const sessionData = fullSessionRef.current;
@@ -316,7 +319,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const blob = new Blob([csvString], { type: "text/csv" });
         
         // Save to raw_test_data > baseline
-        const fileName = `baseline/${user.id}/session_${Date.now()}.csv`;
+        const fileName = `baseline/${user.id}/session_${sessionTimestamp}.csv`;
 
         const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
           contentType: "text/csv",
@@ -327,7 +330,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           return false;
         }
         
-        console.log(`Successfully uploaded to ${fileName}`);
+        console.log(`Successfully uploaded raw file to ${fileName}`);
         return true;
       } catch (err) {
         console.error("Unexpected error during Supabase upload:", err);
@@ -348,55 +351,33 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found for fetching scores.");
 
-        // 2. The Polling Loop: Wait for the Python script to finish processing
+        // 3. The Polling Loop: Download the exact file directly to bypass Supabase Caching
         let csvText = "";
         
-        // Option 1: Infinite polling loop with explicit CSV filtering and debugging
+        // This is exactly what the Python script will name the final file
+        const expectedFileName = `session_${sessionTimestamp}_natural_filtered_focus_scores.csv`;
+        const expectedPath = `baseline/${user.id}/${expectedFileName}`;
+
         while (!cancelled) {
-          const folderPath = `baseline/${user.id}`;
+          console.log(`Checking for processed file at: ${expectedPath}`);
           
-          // List files
-          const { data, error } = await supabase.storage
+          // Download directly! If it fails, the python script isn't done yet.
+          const { data: blob } = await supabase.storage
             .from("focus_scores")
-            .list(folderPath, {
-              sortBy: { column: 'created_at', order: 'desc' },
-            });
+            .download(expectedPath);
 
-          if (error) {
-            console.error("Supabase list error:", error);
-          }
-
-          if (data && data.length > 0) {
-            // Filter out any Supabase folder placeholders, ONLY look at .csv files
-            const csvFiles = data.filter(f => f.name.endsWith(".csv"));
-
-            if (csvFiles.length > 0) {
-              const latestFile = csvFiles[0];
-              console.log("👀 Found newest CSV:", latestFile.name);
-
-              // Download the file (Time check removed so it triggers instantly)
-              const { data: blob, error: downloadError } = await supabase.storage
-                .from("focus_scores")
-                .download(`${folderPath}/${latestFile.name}`);
-
-              if (downloadError) {
-                console.error("❌ Download error:", downloadError);
-              } else if (blob) {
-                csvText = await blob.text();
-                console.log("✅ Successfully downloaded! Auto-redirecting now...");
-                break; // Exit the loop and automatically move to the next page!
-              }
-            } else {
-               // Log exactly what React sees in the folder
-               console.log("Waiting... React sees these files:", data.map(f => f.name));
-            }
+          if (blob) {
+            csvText = await blob.text();
+            console.log("✅ Successfully downloaded! Auto-redirecting now...");
+            break; // File found! Exit the infinite loop
           } else {
-             console.log("Waiting for file... (Folder is completely empty)");
+             console.log("Waiting for backend Python scripts to finish...");
           }
           
-          // Wait 3 seconds before checking again
+          // Wait 3 seconds before trying again
           await sleep(3000); 
         }
+
         if (cancelled) return;
 
         if (!csvText) {
@@ -489,15 +470,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 text-left">
                   <h2 className="text-lg font-bold text-gray-900 mb-2">Connect your Muse 2</h2>
                   <p className="text-gray-600 text-sm mb-4">
-                    When you click the button, your browser will open a secure Bluetooth pairing window. Select your available Muse
-                    device to pair.
+                    When you click the button, your browser will open a secure Bluetooth pairing window. Select your Muse
+                    device there to continue.
                   </p>
 
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900 mb-4">
                     <p className="font-semibold mb-2">Before pairing:</p>
                     <ul className="list-disc ml-5 space-y-1">
                       <li>Turn on Muse 2 (LED blinking)</li>
-                      <li>Use Chrome / Microsoft Edge desktop (Bluetooth Supported)</li>
+                      <li>Use Chrome / Edge desktop (Bluetooth Supported)</li>
                     </ul>
                   </div>
 
