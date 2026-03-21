@@ -336,12 +336,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   // MANUAL BUTTON FETCH LOGIC
   const handleCheckResults = async () => {
   setIsChecking(true);
+
   try {
     const { data: { user } } = await supabase.auth.getUser();
+    console.log("auth user:", user);
+
     if (!user) throw new Error("User not found");
 
     const folderPath = `baseline/${user.id}`;
-    console.log("Checking bucket=focus_scores, folder=", folderPath);
+    console.log("Checking folder:", folderPath);
 
     const { data, error } = await supabase.storage
       .from("focus_scores")
@@ -355,16 +358,15 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     if (error) throw error;
 
     const csvFiles = (data || []).filter((f) => f.name.endsWith(".csv"));
-    console.log("CSV files found:", csvFiles);
+    console.log("CSV files:", csvFiles);
 
     if (csvFiles.length === 0) {
-      alert("Results not found yet. Check console logs.");
-      return;
+      throw new Error(`No CSV files found in focus_scores/${folderPath}`);
     }
 
     const latestFile = csvFiles[0];
     const fullPath = `${folderPath}/${latestFile.name}`;
-    console.log("Downloading:", fullPath);
+    console.log("Downloading file:", fullPath);
 
     const { data: blob, error: downloadError } = await supabase.storage
       .from("focus_scores")
@@ -373,17 +375,27 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     console.log("DOWNLOAD error:", downloadError);
     console.log("Blob exists:", !!blob);
 
-    if (downloadError || !blob) throw downloadError || new Error("Download returned no blob");
+    if (downloadError || !blob) {
+      throw downloadError || new Error("Download returned no blob");
+    }
 
     const csvText = await blob.text();
-    console.log("CSV preview:", csvText.slice(0, 500));
+    console.log("CSV first 500 chars:", csvText.slice(0, 500));
+
+    const lines = csvText.trim().split(/\r?\n/);
+    console.log("CSV header row:", lines[0]);
 
     const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
     console.log("baseline_mean_focus:", baseline_mean_focus);
 
     const plan = generateRuleBasedPlan(baseline_mean_focus);
+    console.log("generated plan:", plan);
+
     addPlannedMinutesForToday(plan.totalDuration);
+    console.log("calling onComplete...");
+
     onCompleteRef.current(plan);
+    console.log("onComplete finished");
 
   } catch (err: any) {
     console.error("Failed to check results:", err);
