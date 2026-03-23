@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 10 * 60;
+const STUDYING_DURATION = 5 * 60;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -175,8 +175,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
     try {
       const client = new MuseClient();
-      await client.connect(); 
-      await client.start(); 
+      await client.connect(); // Trigger Bluetooth Window Pop-up
+      await client.start(); // Begin Streaming of Raw EEG Signals
 
       const accSub = client.accelerometerData.subscribe((reading: any) => {
         const last = reading.samples?.[reading.samples.length - 1];
@@ -213,9 +213,10 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           accZ: accZ as number, 
         };
 
-        fullSessionRef.current.push(sample); 
-        bufferRef.current.push(sample); 
+        fullSessionRef.current.push(sample); // Add sample into Entire Recording for Supabase
+        bufferRef.current.push(sample); // Add sample into temporary buffer for Real-Time Streaming
 
+        // Update EEG Waveform per Sample
         if (rafIdRef.current == null) {
           rafIdRef.current = requestAnimationFrame(flushToState);
         }
@@ -293,6 +294,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+    // Export Raw EEG Data to Supabase Storage (raw_test_data)
     const uploadEEGData = async (): Promise<boolean> => {
       try {
         const sessionData = fullSessionRef.current;
@@ -301,7 +303,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const { data: { user }, error: authError } = await supabase.auth.getUser();
 
         if (authError || !user) {
-          console.error("Upload blocked: User is not authenticated.");
+          console.error("Upload blocked: User is not authenticated.", authError);
           return false;
         }
 
@@ -314,6 +316,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
         const csvString = csvRows.join("\n");
         const blob = new Blob([csvString], { type: "text/csv" });
+        
+        // Save to raw_test_data > baseline
         const fileName = `baseline/${user.id}/session_${Date.now()}.csv`;
 
         const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
@@ -325,6 +329,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           return false;
         }
         
+        console.log(`Successfully uploaded to ${fileName}`);
         return true;
       } catch (err) {
         console.error("Unexpected error during Supabase upload:", err);
@@ -345,34 +350,52 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found for fetching scores.");
 
+        // 2. The Polling Loop: Wait for the Python script to finish processing
         let csvText = "";
         
+        // Option 1: Infinite polling loop with explicit CSV filtering and debugging
         while (!cancelled) {
           const folderPath = `baseline/${user.id}`;
           
-          const { data } = await supabase.storage
+          // List files
+          const { data, error } = await supabase.storage
             .from("focus_scores")
             .list(folderPath, {
               sortBy: { column: 'created_at', order: 'desc' },
             });
 
+          if (error) {
+            console.error("Supabase list error:", error);
+          }
+
           if (data && data.length > 0) {
+            // Filter out any Supabase folder placeholders, ONLY look at .csv files
             const csvFiles = data.filter(f => f.name.endsWith(".csv"));
 
             if (csvFiles.length > 0) {
               const latestFile = csvFiles[0];
+              console.log("👀 Found newest CSV:", latestFile.name);
 
+              // Download the file
               const { data: blob, error: downloadError } = await supabase.storage
                 .from("focus_scores")
                 .download(`${folderPath}/${latestFile.name}`);
 
-              if (!downloadError && blob) {
+              if (downloadError) {
+                console.error("❌ Download error:", downloadError);
+              } else if (blob) {
                 csvText = await blob.text();
-                break; 
+                console.log("✅ Successfully downloaded and read the CSV!");
+                break; // File found! Exit the infinite loop
               }
+            } else {
+               console.log("Waiting for .csv file... (Only found folders/placeholders)");
             }
+          } else {
+             console.log("Waiting for file... (Folder is empty)");
           }
           
+          // Wait 3 seconds before checking again
           await sleep(3000); 
         }
 
@@ -382,9 +405,11 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           throw new Error("Failed to read the downloaded CSV file.");
         }
 
+        // 4. Compute real mean focus from the downloaded CSV + generate plan
         const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
         const plan = generateRuleBasedPlan(baseline_mean_focus);
 
+        // 5. Save planned minutes + trigger redirect
         addPlannedMinutesForToday(plan.totalDuration);
 
         if (!cancelled) {
