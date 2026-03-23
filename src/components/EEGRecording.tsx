@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 10 * 0;
+const STUDYING_DURATION = 10 * 60;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -164,6 +164,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     });
   }, []);
 
+  // Verify Availability of Muse within Supported Browser
   const connectMuseWeb = async () => {
     if (!("bluetooth" in navigator)) {
       alert("Web Bluetooth is not supported on this browser. Please use Chrome or Microsoft Edge (desktop) over HTTPS.");
@@ -174,8 +175,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
     try {
       const client = new MuseClient();
-      await client.connect();
-      await client.start();
+      await client.connect(); 
+      await client.start(); 
 
       const accSub = client.accelerometerData.subscribe((reading: any) => {
         const last = reading.samples?.[reading.samples.length - 1];
@@ -212,8 +213,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           accZ: accZ as number, 
         };
 
-        fullSessionRef.current.push(sample);
-        bufferRef.current.push(sample);
+        fullSessionRef.current.push(sample); 
+        bufferRef.current.push(sample); 
 
         if (rafIdRef.current == null) {
           rafIdRef.current = requestAnimationFrame(flushToState);
@@ -292,7 +293,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    // 1. Export Raw EEG Data to Supabase
     const uploadEEGData = async (): Promise<boolean> => {
       try {
         const sessionData = fullSessionRef.current;
@@ -301,7 +301,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const { data: { user }, error: authError } = await supabase.auth.getUser();
 
         if (authError || !user) {
-          console.error("Upload blocked: User is not authenticated.", authError);
+          console.error("Upload blocked: User is not authenticated.");
           return false;
         }
 
@@ -314,8 +314,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
         const csvString = csvRows.join("\n");
         const blob = new Blob([csvString], { type: "text/csv" });
-        
-        // Save to raw_test_data > baseline
         const fileName = `baseline/${user.id}/session_${Date.now()}.csv`;
 
         const { error } = await supabase.storage.from("raw_test_data").upload(fileName, blob, {
@@ -327,7 +325,6 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           return false;
         }
         
-        console.log(`Successfully uploaded to ${fileName}`);
         return true;
       } catch (err) {
         console.error("Unexpected error during Supabase upload:", err);
@@ -348,52 +345,34 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found for fetching scores.");
 
-        // 2. The Polling Loop: Wait for the Python script to finish processing
         let csvText = "";
         
-        // Option 1: Infinite polling loop with explicit CSV filtering and debugging
         while (!cancelled) {
           const folderPath = `baseline/${user.id}`;
           
-          // List files
-          const { data, error } = await supabase.storage
+          const { data } = await supabase.storage
             .from("focus_scores")
             .list(folderPath, {
               sortBy: { column: 'created_at', order: 'desc' },
             });
 
-          if (error) {
-            console.error("Supabase list error:", error);
-          }
-
           if (data && data.length > 0) {
-            // Filter out any Supabase folder placeholders, ONLY look at .csv files
             const csvFiles = data.filter(f => f.name.endsWith(".csv"));
 
             if (csvFiles.length > 0) {
               const latestFile = csvFiles[0];
-              console.log("👀 Found newest CSV:", latestFile.name);
 
-              // Download the file
               const { data: blob, error: downloadError } = await supabase.storage
                 .from("focus_scores")
                 .download(`${folderPath}/${latestFile.name}`);
 
-              if (downloadError) {
-                console.error("❌ Download error:", downloadError);
-              } else if (blob) {
+              if (!downloadError && blob) {
                 csvText = await blob.text();
-                console.log("✅ Successfully downloaded and read the CSV!");
-                break; // File found! Exit the infinite loop
+                break; 
               }
-            } else {
-               console.log("Waiting for .csv file... (Only found folders/placeholders)");
             }
-          } else {
-             console.log("Waiting for file... (Folder is empty)");
           }
           
-          // Wait 3 seconds before checking again
           await sleep(3000); 
         }
 
@@ -403,11 +382,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           throw new Error("Failed to read the downloaded CSV file.");
         }
 
-        // 4. Compute real mean focus from the downloaded CSV + generate plan
         const baseline_mean_focus = meanOfColumn(csvText, "p_focus_smoothed");
         const plan = generateRuleBasedPlan(baseline_mean_focus);
 
-        // 5. Save planned minutes + trigger redirect
         addPlannedMinutesForToday(plan.totalDuration);
 
         if (!cancelled) {
@@ -490,7 +467,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                   <h2 className="text-lg font-bold text-gray-900 mb-2">Connect your Muse 2</h2>
                   <p className="text-gray-600 text-sm mb-4">
                     When you click the button, your browser will open a secure Bluetooth pairing window. Select your Muse
-                    device there to continue.
+                    device there to pair.
                   </p>
 
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900 mb-4">
