@@ -92,7 +92,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   const [isConnecting, setIsConnecting] = useState(false);
 
   const [isRecording, setIsRecording] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAnalysing, setisAnalysing] = useState(false);
   const [progress, setProgress] = useState(0);
 
   const [recordingStage, setRecordingStage] = useState<RecordingStage>("eyesClosed");
@@ -213,8 +213,8 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           accZ: accZ as number, 
         };
 
-        fullSessionRef.current.push(sample); // Add sample into Entire Recording for Supabase
-        bufferRef.current.push(sample); // Add sample into temporary buffer for Real-Time Streaming
+        fullSessionRef.current.push(sample); // Stores Sample in Local Memory for Full Recording
+        bufferRef.current.push(sample); // Stores Sample into Temporary Buffer for Real-Time Visualisation
 
         // Update EEG Waveform per Sample
         if (rafIdRef.current == null) {
@@ -261,7 +261,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       if (elapsed >= EYES_CLOSED_DURATION && recordingStageRef.current === "eyesClosed") {
         recordingStageRef.current = "studying";
         setRecordingStage("studying");
-        setStageBanner("Start studying now. Continue for 10 minutes.");
+        setStageBanner("Start studying now. Continue for 5 minutes.");
         window.setTimeout(() => setStageBanner(null), 6000);
       }
 
@@ -271,7 +271,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
       if (pct >= 100) {
         setStageBanner(null);
         setIsRecording(false);
-        setIsAnalyzing(true);
+        setisAnalysing(true);
 
         if (timerRef.current) {
           window.clearInterval(timerRef.current);
@@ -289,7 +289,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
   }, [isRecording]);
 
   useEffect(() => {
-    if (!isAnalyzing) return;
+    if (!isAnalysing) return;
 
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -343,7 +343,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
 
         if (!uploadSuccess && !cancelled) {
           alert("Raw upload failed. Cannot generate plan.");
-          setIsAnalyzing(false);
+          setisAnalysing(false);
           return;
         }
 
@@ -420,7 +420,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         console.error("Plan generation failed:", err);
         if (!cancelled) {
           alert(`Could not generate study plan: ${err.message}`);
-          setIsAnalyzing(false);
+          setisAnalysing(false);
         }
       }
     })();
@@ -428,7 +428,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     return () => {
       cancelled = true;
     };
-  }, [isAnalyzing]);
+  }, [isAnalysing]);
 
   const startRecording = () => {
     if (!museConnected) {
@@ -440,7 +440,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
     setWaveformData([]);
     fullSessionRef.current = [];
 
-    setIsAnalyzing(false);
+    setisAnalysing(false);
     setIsRecording(true);
   };
 
@@ -468,9 +468,9 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            {!isRecording && !isAnalyzing && "Ready to Record"}
+            {!isRecording && !isAnalysing && "Ready to Record"}
             {isRecording && "Recording in Progress..."}
-            {isAnalyzing && "Analyzing and Processing EEG..."}
+            {isAnalysing && "Analyzing and Processing EEG..."}
           </h2>
 
           {isRecording && stageBanner && (
@@ -479,7 +479,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
             </div>
           )}
 
-          {!isRecording && !isAnalyzing && (
+          {!isRecording && !isAnalysing && (
             <div className="space-y-4">
               <p className="text-sm">
                 <span className={`font-bold ${museConnected ? "text-green-600" : "text-red-600"}`}>
@@ -530,12 +530,12 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
                     <li className="flex items-start gap-2">
                       <span className="font-bold">3.</span>
                       <span>
-                        The recording will last <span className="font-semibold">11 minutes</span>:
+                        The recording will last <span className="font-semibold">6 minutes</span>:
                         <span className="block mt-1">
                           • <span className="font-semibold">First Minute:</span> Close your eyes and relax
                         </span>
                         <span className="block">
-                          • <span className="font-semibold">Last 10 Minutes:</span> Start studying normally
+                          • <span className="font-semibold">Last 5 Minutes:</span> Start studying normally
                         </span>
                       </span>
                     </li>
@@ -571,7 +571,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           </div>
         )}
 
-        {!isRecording && !isAnalyzing && museConnected && (
+        {!isRecording && !isAnalysing && museConnected && (
           <button
             onClick={startRecording}
             className="w-full bg-indigo-600 text-white py-4 rounded-xl font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
@@ -591,7 +591,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           </div>
         )}
 
-        {isAnalyzing && (
+        {isAnalysing && (
           <div className="flex flex-col items-center gap-4">
             <p className="text-gray-600 mb-4">Stay on this page for your personalised study plan!</p>
 
@@ -604,7 +604,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
         )}
       </div>
 
-      {isAnalyzing && (
+      {isAnalysing && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-6 py-4 text-sm flex items-start gap-3">
           <AlertTriangle className="w-9 h-9 mt-0.5 text-amber-700" />
           <div>

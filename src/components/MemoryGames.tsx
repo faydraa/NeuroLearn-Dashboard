@@ -286,7 +286,7 @@ export function MemoryGames() {
                   card.isFlipped || card.isMatched
                     ? 'bg-white border-2 border-purple-500'
                     : 'bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700'
-                } ${card.isMatched ? 'opacity-50' : ''}`}
+                } `}
               >
                 {card.isFlipped || card.isMatched ? card.value : '?'}
               </button>
