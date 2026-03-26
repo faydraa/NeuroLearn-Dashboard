@@ -26,8 +26,8 @@ export type RawEEGSample = {
 type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
-const EYES_CLOSED_DURATION = 60;
-const STUDYING_DURATION = 5 * 60;
+const EYES_CLOSED_DURATION = 10;
+const STUDYING_DURATION = 5 * 0;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
