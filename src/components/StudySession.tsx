@@ -446,11 +446,6 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
               <div className="text-center mb-4">
                 <div className={`text-4xl font-bold ${focusColor}`}>{focusPercent}%</div>
                 <p className="text-xs text-gray-600 mt-1 capitalize">{focusBandLabel}</p>
-                {typeof studyPlan.baseline_mean_focus === "number" && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Mean p_focus_smoothed: {studyPlan.baseline_mean_focus.toFixed(3)}
-                  </p>
-                )}
               </div>
               <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div className={`h-full transition-all duration-1000 ${focusBarColor}`} style={{ width: `${focusPercent}%` }} />
