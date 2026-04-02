@@ -1,6 +1,25 @@
 import { useState, useEffect, useMemo } from "react";
-import { TrendingUp, Target, Award, Brain, ChevronLeft, ChevronRight, Sparkles, BookOpen, } from "lucide-react";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, } from "recharts";
+import {
+  TrendingUp,
+  Target,
+  Award,
+  Brain,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  BookOpen,
+} from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 type ProgressTrackingProps = {
   userName: string;
@@ -125,9 +144,22 @@ export function ProgressTracking({ userName, userId }: ProgressTrackingProps) {
   );
 
   useEffect(() => {
-    const saved = localStorage.getItem("studyProgress");
-    const data = saved ? JSON.parse(saved) : {};
-    setProgressMap(data);
+    const mockProgress: Record<string, DailyProgress> = {
+      "2026-04-01": { date: "2026-04-01", duration: 90, sessions: 1, avgFocus: 72 },
+      "2026-04-02": { date: "2026-04-02", duration: 210, sessions: 2, avgFocus: 67 },
+      "2026-04-03": { date: "2026-04-03", duration: 60, sessions: 1, avgFocus: 64 },
+      "2026-04-04": { date: "2026-04-04", duration: 120, sessions: 2, avgFocus: 76 },
+      "2026-04-05": { date: "2026-04-05", duration: 45, sessions: 1, avgFocus: 58 },
+      "2026-04-06": { date: "2026-04-06", duration: 75, sessions: 1, avgFocus: 69 },
+      "2026-04-07": { date: "2026-04-07", duration: 0, sessions: 0, avgFocus: 0 },
+      "2026-04-08": { date: "2026-04-08", duration: 135, sessions: 2, avgFocus: 74 },
+      "2026-04-09": { date: "2026-04-09", duration: 35, sessions: 1, avgFocus: 61 },
+      "2026-04-10": { date: "2026-04-10", duration: 95, sessions: 1, avgFocus: 71 },
+      "2026-04-11": { date: "2026-04-11", duration: 110, sessions: 2, avgFocus: 79 },
+      "2026-04-12": { date: "2026-04-12", duration: 80, sessions: 1, avgFocus: 66 },
+    };
+
+    setProgressMap(mockProgress);
   }, []);
 
   useEffect(() => {

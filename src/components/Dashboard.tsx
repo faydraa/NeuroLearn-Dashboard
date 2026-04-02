@@ -34,30 +34,26 @@ export function Dashboard({ user, onStartRecording }: DashboardProps) {
   const greeting = getGreeting();
 
   useEffect(() => {
-    try {
-      const existing = localStorage.getItem('studyProgress');
-      const progress = existing ? JSON.parse(existing) : {};
-      const today = progress[todayKey];
+    const mockProgress: Record<string, TodayProgress> = {
+      '2026-04-01': { completedMinutes: 90, plannedMinutes: 90, sessions: 1, avgFocus: 72 },
+      '2026-04-02': { completedMinutes: 210, plannedMinutes: 210, sessions: 2, avgFocus: 67 },
+      '2026-04-03': { completedMinutes: 60, plannedMinutes: 60, sessions: 1, avgFocus: 64 },
+      '2026-04-04': { completedMinutes: 120, plannedMinutes: 120, sessions: 2, avgFocus: 76 },
+      '2026-04-05': { completedMinutes: 45, plannedMinutes: 45, sessions: 1, avgFocus: 58 },
+      '2026-04-06': { completedMinutes: 75, plannedMinutes: 75, sessions: 1, avgFocus: 69 },
+      '2026-04-07': { completedMinutes: 0, plannedMinutes: 0, sessions: 0, avgFocus: 0 },
+      '2026-04-08': { completedMinutes: 135, plannedMinutes: 135, sessions: 2, avgFocus: 74 },
+      '2026-04-09': { completedMinutes: 50, plannedMinutes: 50, sessions: 1, avgFocus: 61 },
+      '2026-04-10': { completedMinutes: 95, plannedMinutes: 95, sessions: 1, avgFocus: 71 },
+      '2026-04-11': { completedMinutes: 110, plannedMinutes: 110, sessions: 2, avgFocus: 79 },
+      '2026-04-12': { completedMinutes: 80, plannedMinutes: 80, sessions: 1, avgFocus: 66 },
+    };
 
-      if (today) {
-        const completed = today.completedMinutes ?? today.duration ?? 0;
-        const planned = today.plannedMinutes ?? 0;
+    const today = mockProgress[todayKey];
 
-        setTodayProgress({
-          completedMinutes: Math.round(completed),
-          plannedMinutes: Math.round(planned),
-          sessions: Math.round(today.sessions || 0),
-          avgFocus: Math.round(today.avgFocus || 0),
-        });
-      } else {
-        setTodayProgress({
-          completedMinutes: 0,
-          plannedMinutes: 0,
-          sessions: 0,
-          avgFocus: 0,
-        });
-      }
-    } catch {
+    if (today) {
+      setTodayProgress(today);
+    } else {
       setTodayProgress({
         completedMinutes: 0,
         plannedMinutes: 0,
