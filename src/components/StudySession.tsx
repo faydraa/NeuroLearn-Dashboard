@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Play, Pause, Square, Coffee, Brain, Apple, CheckCircle } from "lucide-react";
 import type { StudyPlan } from "../App";
-import { MuseClient } from "muse-js";
-import type { SubscriptionLike } from "rxjs";
 import { supabase } from "../library/supabase";
 
 type StudySessionProps = {
   studyPlan: StudyPlan;
+  userId: string;
   onComplete: () => void;
 };
 
@@ -15,52 +14,76 @@ type Notification = {
   message: string;
 };
 
-export type RawEEGSample = {
-  timestamp: number;
-  tp9: number;
-  af7: number;
-  af8: number;
-  tp10: number;
-  accX: number;
-  accY: number;
-  accZ: number;
+type SessionSummary = {
+  baselineAttention: number;
+  sessionAttention: number;
+  focusedPercent: number;
+  longestFocusedStreakMin: number;
+  avgFocus: number;
+  focusBand: string;
 };
 
-export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
+function buildSessionSummary(studyPlan: StudyPlan, durationMinutes: number): SessionSummary {
+  const baselineAttention = studyPlan.baseline_mean_focus
+    ? Math.round(studyPlan.baseline_mean_focus * 100)
+    : 68;
+
+  const focusBand = studyPlan.focusBand || "moderate_focus";
+
+  let sessionAttention = baselineAttention;
+  let focusedPercent = 65;
+
+  switch (focusBand) {
+    case "strong_focus":
+      sessionAttention = Math.min(96, baselineAttention + 6);
+      focusedPercent = 80;
+      break;
+    case "moderate_focus":
+      sessionAttention = Math.min(90, baselineAttention + 2);
+      focusedPercent = 65;
+      break;
+    case "distracted":
+      sessionAttention = Math.max(30, baselineAttention - 5);
+      focusedPercent = 45;
+      break;
+    case "very_low_engagement":
+      sessionAttention = Math.max(20, baselineAttention - 10);
+      focusedPercent = 30;
+      break;
+    default:
+      sessionAttention = baselineAttention;
+      focusedPercent = 60;
+  }
+
+  const longestFocusedStreakMin = Math.max(
+    5,
+    Math.min(durationMinutes, Math.round(durationMinutes * (focusedPercent / 100) * 0.45))
+  );
+
+  const avgFocus = Math.round((baselineAttention + sessionAttention) / 2);
+
+  return {
+    baselineAttention,
+    sessionAttention,
+    focusedPercent,
+    longestFocusedStreakMin,
+    avgFocus,
+    focusBand,
+  };
+}
+
+export function StudySession({ studyPlan, userId, onComplete }: StudySessionProps) {
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [notification, setNotification] = useState<Notification | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const [museConnected, setMuseConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-
-  const focusPercent = Math.round((studyPlan.baseline_mean_focus ?? 0.75) * 100);
-  const focusBandLabel = (studyPlan.focusBand ?? "unknown").replaceAll("_", " ");
+  const focusPercent = Math.round((studyPlan.baseline_mean_focus ?? 0.68) * 100);
+  const focusBandLabel = (studyPlan.focusBand ?? "moderate_focus").replaceAll("_", " ");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const focusLevelRef = useRef(focusPercent);
-
-  const eegSubRef = useRef<SubscriptionLike | null>(null);
-  const accSubRef = useRef<SubscriptionLike | null>(null);
-
-  const latestRef = useRef<{
-    tp9?: number;
-    af7?: number;
-    af8?: number;
-    tp10?: number;
-    accX?: number;
-    accY?: number;
-    accZ?: number;
-  }>({});
-
-  const isRecordingRef = useRef(false);
-  const fullSessionRef = useRef<RawEEGSample[]>([]);
+  const startedAtRef = useRef<string | null>(null);
   const hasFinishedRef = useRef(false);
-
-  useEffect(() => {
-    focusLevelRef.current = focusPercent;
-  }, [focusPercent]);
 
   useEffect(() => {
     audioRef.current = new Audio(
@@ -68,82 +91,13 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
     );
 
     return () => {
-      eegSubRef.current?.unsubscribe();
-      accSubRef.current?.unsubscribe();
+      audioRef.current = null;
     };
   }, []);
 
-  useEffect(() => {
-    isRecordingRef.current = isRunning;
-  }, [isRunning]);
-
-  const connectMuseWeb = async () => {
-    if (!("bluetooth" in navigator)) {
-      alert("Web Bluetooth is not supported on this browser.");
-      return;
-    }
-
-    setIsConnecting(true);
-
-    try {
-      const client = new MuseClient();
-      await client.connect();
-      await client.start();
-
-      const accSub = client.accelerometerData.subscribe((reading: any) => {
-        const last = reading.samples?.[reading.samples.length - 1];
-        if (!last) return;
-
-        latestRef.current.accX = last.x;
-        latestRef.current.accY = last.y;
-        latestRef.current.accZ = last.z;
-      });
-
-      const eegSub = client.eegReadings.subscribe((reading: any) => {
-        const last = reading.samples?.[reading.samples.length - 1];
-        if (typeof last !== "number") return;
-
-        if (reading.electrode === 0) latestRef.current.tp9 = last;
-        if (reading.electrode === 1) latestRef.current.af7 = last;
-        if (reading.electrode === 2) latestRef.current.af8 = last;
-        if (reading.electrode === 3) latestRef.current.tp10 = last;
-
-        if (!isRecordingRef.current) return;
-
-        const { tp9, af7, af8, tp10, accX, accY, accZ } = latestRef.current;
-        if ([tp9, af7, af8, tp10, accX, accY, accZ].some((v) => typeof v !== "number")) return;
-
-        const sample: RawEEGSample = {
-          timestamp: Date.now(),
-          tp9: tp9 as number,
-          af7: af7 as number,
-          af8: af8 as number,
-          tp10: tp10 as number,
-          accX: accX as number,
-          accY: accY as number,
-          accZ: accZ as number,
-        };
-
-        fullSessionRef.current.push(sample);
-      });
-
-      eegSubRef.current?.unsubscribe();
-      accSubRef.current?.unsubscribe();
-      eegSubRef.current = eegSub;
-      accSubRef.current = accSub;
-
-      setMuseConnected(true);
-      alert("Muse connected! Ready to begin your study session.");
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
   const showNotification = useCallback((notif: Notification) => {
     setNotification(notif);
-    setTimeout(() => setNotification(null), 10000);
+    window.setTimeout(() => setNotification(null), 10000);
   }, []);
 
   const playSound = useCallback(() => {
@@ -152,166 +106,83 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
     try {
       a.currentTime = 0;
       a.play().catch(() => {});
-    } catch {}
-  }, []);
-
-  const saveProgress = useCallback((totalSeconds: number) => {
-    const today = new Date().toISOString().split("T")[0];
-    const existing = localStorage.getItem("studyProgress");
-    const progress = existing ? JSON.parse(existing) : {};
-
-    const minutesThisSession = totalSeconds / 60;
-    const currentFocus = focusLevelRef.current;
-
-    if (!progress[today]) {
-      progress[today] = {
-        completedMinutes: 0,
-        plannedMinutes: 0,
-        sessions: 0,
-        avgFocus: 0,
-        focusMinutes: 0,
-      };
-    } else {
-      if (progress[today].completedMinutes == null) progress[today].completedMinutes = progress[today].duration ?? 0;
-      if (progress[today].plannedMinutes == null) progress[today].plannedMinutes = 0;
-      if (progress[today].sessions == null) progress[today].sessions = 0;
-      if (progress[today].avgFocus == null) progress[today].avgFocus = 0;
-      if (progress[today].focusMinutes == null) progress[today].focusMinutes = 0;
+    } catch {
+      // ignore audio errors
     }
-
-    progress[today].completedMinutes += minutesThisSession;
-    progress[today].sessions += 1;
-
-    const prevFocusMinutes = progress[today].focusMinutes || 0;
-    const prevAvg = progress[today].avgFocus || 0;
-    const newFocusMinutes = prevFocusMinutes + minutesThisSession;
-
-    const weighted =
-      newFocusMinutes > 0
-        ? ((prevAvg * prevFocusMinutes) + (currentFocus * minutesThisSession)) / newFocusMinutes
-        : currentFocus;
-
-    progress[today].avgFocus = weighted;
-    progress[today].focusMinutes = newFocusMinutes;
-    progress[today].duration = progress[today].completedMinutes;
-
-    localStorage.setItem("studyProgress", JSON.stringify(progress));
   }, []);
-
-  const uploadStudySessionData = useCallback(
-  async (elapsedSeconds: number) => {
-    console.log("Step 1: Preparing to upload study session...");
-
-    try {
-      const sessionData = fullSessionRef.current;
-      console.log(`Step 2: Found ${sessionData?.length || 0} EEG data points.`);
-
-      // ⬇️ PUT TIMEOUT CODE HERE
-      const sessionResult: any = await Promise.race([
-        supabase.auth.getSession(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Auth request timed out")), 8000)
-        ),
-      ]);
-
-      const session = sessionResult?.data?.session ?? null;
-      const user = session?.user ?? null;
-
-      console.log("Auth result:", sessionResult);
-
-      if (!user) {
-        throw new Error("No authenticated session found");
-      }
-
-      console.log("Step 3: Authenticated as user:", user.id);
-
-      if (!sessionData || sessionData.length === 0) {
-        throw new Error("No EEG data was recorded");
-      }
-
-      const headers = [
-        "timestamp",
-        "eeg_1",
-        "eeg_2",
-        "eeg_3",
-        "eeg_4",
-        "acc_1",
-        "acc_2",
-        "acc_3",
-      ];
-      const csvRows = [headers.join(",")];
-
-      sessionData.forEach((sample) => {
-        csvRows.push(
-          `${sample.timestamp},${sample.tp9},${sample.af7},${sample.af8},${sample.tp10},${sample.accX},${sample.accY},${sample.accZ}`
-        );
-      });
-
-      const csvString = csvRows.join("\n");
-      const blob = new Blob([csvString], { type: "text/csv" });
-
-      const fileName = `study session/${user.id}/session_${Date.now()}.csv`;
-      console.log(`Step 4: Attempting to upload to Supabase -> ${fileName}`);
-
-      const { error } = await supabase.storage
-        .from("raw_test_data")
-        .upload(fileName, blob, {
-          contentType: "text/csv",
-          upsert: false,
-        });
-
-      if (error) throw error;
-
-      console.log(`✅ Step 5 Success: Uploaded study data to ${fileName}`);
-
-      saveProgress(elapsedSeconds);
-      onComplete();
-    } catch (err: any) {
-      console.error("CRITICAL ERROR during upload:", err);
-      alert("Failed to upload session data: " + (err?.message || String(err)));
-      setIsUploading(false);
-      hasFinishedRef.current = false;
-    }
-  },
-  [saveProgress, onComplete]
-);
-
-  const finalizeSession = useCallback(
-    async (elapsedSeconds: number) => {
-      if (hasFinishedRef.current) return;
-
-      hasFinishedRef.current = true;
-      setIsRunning(false);
-      setIsUploading(true);
-
-      await uploadStudySessionData(elapsedSeconds);
-    },
-    [uploadStudySessionData]
-  );
 
   const breaksSorted = useMemo(() => {
     return [...(studyPlan.breaks ?? [])].sort((a, b) => a.time - b.time);
   }, [studyPlan.breaks]);
 
-  const getBreakIcon = (breakType: string) => {
-    const t = breakType.toLowerCase();
-    if (t.includes("water")) return Coffee;
-    if (t.includes("breath") || t.includes("meditation")) return Brain;
-    if (t.includes("snack")) return Apple;
-    return Coffee;
-  };
+  const finalizeSession = useCallback(
+  async (elapsedSeconds: number) => {
+    if (hasFinishedRef.current) return;
+    hasFinishedRef.current = true;
+
+    setIsRunning(false);
+    setIsSaving(true);
+
+    try {
+      const durationMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
+      const completedAt = new Date();
+      const summary = buildSessionSummary(studyPlan, durationMinutes);
+
+      const payload = {
+        user_id: userId,
+        session_label: `Session • ${completedAt.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        })}`,
+        session_date: `${completedAt.getFullYear()}-${String(
+          completedAt.getMonth() + 1
+        ).padStart(2, "0")}-${String(completedAt.getDate()).padStart(2, "0")}`,
+        started_at: startedAtRef.current,
+        completed_at: completedAt.toISOString(),
+        duration_minutes: durationMinutes,
+        baseline_attention: summary.baselineAttention,
+        session_attention: summary.sessionAttention,
+        focused_percent: summary.focusedPercent,
+        longest_focused_streak_min: summary.longestFocusedStreakMin,
+        avg_focus: summary.avgFocus,
+        focus_band: summary.focusBand,
+      };
+
+      console.log("Saving study session payload:", payload);
+
+      const { data, error } = await supabase
+        .from("study_sessions")
+        .insert([payload])
+        .select()
+        .single();
+
+      console.log("direct insert data =", data);
+      console.log("direct insert error =", error);
+
+      if (error) throw error;
+
+      onComplete();
+    } catch (error: any) {
+      console.error("Failed to save study session:", error);
+      alert(error?.message || "Failed to save study session.");
+      hasFinishedRef.current = false;
+      setIsSaving(false);
+    }
+  },
+  [studyPlan, userId, onComplete]
+);
 
   useEffect(() => {
     if (!isRunning) return;
 
     const totalSeconds = studyPlan.totalDuration * 60;
 
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       setTimeElapsed((prev) => {
-        const newTime = prev + 1;
+        const next = prev + 1;
 
         breaksSorted.forEach((breakItem) => {
-          if (newTime === breakItem.time * 60) {
+          if (next === breakItem.time * 60) {
             showNotification({
               type: "break",
               message: `Time for a ${breakItem.type}! Take ${breakItem.duration} minutes.`,
@@ -320,24 +191,41 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
           }
         });
 
-        if (newTime >= totalSeconds) {
-          clearInterval(interval);
+        if (next >= totalSeconds) {
+          window.clearInterval(interval);
           void finalizeSession(totalSeconds);
           return totalSeconds;
         }
 
-        return newTime;
+        return next;
       });
     }, 1000);
 
-    return () => clearInterval(interval);
-  }, [isRunning, breaksSorted, studyPlan.totalDuration, showNotification, playSound, finalizeSession]);
+    return () => window.clearInterval(interval);
+  }, [
+    isRunning,
+    studyPlan.totalDuration,
+    breaksSorted,
+    showNotification,
+    playSound,
+    finalizeSession,
+  ]);
 
   const formatTime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return `${hrs.toString().padStart(2, "0")}:${mins
+      .toString()
+      .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const getBreakIcon = (breakType: string) => {
+    const t = breakType.toLowerCase();
+    if (t.includes("water")) return Coffee;
+    if (t.includes("breath") || t.includes("meditation")) return Brain;
+    if (t.includes("snack")) return Apple;
+    return Coffee;
   };
 
   const totalSeconds = studyPlan.totalDuration * 60;
@@ -364,11 +252,11 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
         </div>
       )}
 
-      {isUploading ? (
+      {isSaving ? (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-12 text-center">
           <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4 animate-pulse" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Session Complete!</h2>
-          <p className="text-gray-600">Uploading your EEG data to the cloud...</p>
+          <p className="text-gray-600">Saving your study session to the cloud...</p>
         </div>
       ) : (
         <div className="grid md:grid-cols-3 gap-6 mb-8 items-stretch">
@@ -396,20 +284,11 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
             </div>
 
             <div className="flex items-center justify-center gap-4">
-              {!museConnected ? (
-                <button
-                  onClick={connectMuseWeb}
-                  disabled={isConnecting}
-                  className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition"
-                >
-                  <Brain className="w-5 h-5" />
-                  {isConnecting ? "Connecting..." : "Connect Headset to Start"}
-                </button>
-              ) : !isRunning ? (
+              {!isRunning ? (
                 <button
                   onClick={() => {
-                    if (timeElapsed === 0) {
-                      fullSessionRef.current = [];
+                    if (timeElapsed === 0 && !startedAtRef.current) {
+                      startedAtRef.current = new Date().toISOString();
                       hasFinishedRef.current = false;
                     }
                     setIsRunning(true);
@@ -431,7 +310,7 @@ export function StudySession({ studyPlan, onComplete }: StudySessionProps) {
 
               <button
                 onClick={() => void finalizeSession(timeElapsed)}
-                disabled={(!museConnected && timeElapsed === 0) || isUploading}
+                disabled={isSaving}
                 className="flex items-center gap-2 bg-gray-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-gray-700 transition disabled:opacity-50"
               >
                 <Square className="w-5 h-5" />

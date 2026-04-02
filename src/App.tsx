@@ -17,7 +17,6 @@ export type StudyPlan = {
   breaks: { time: number; duration: number; type: string }[];
   subjects: { name: string; duration: number; startTime: number }[];
   generatedAt: Date;
-
   baseline_mean_focus?: number;
   focusBand?: string;
 };
@@ -271,10 +270,19 @@ export default function App() {
         )}
 
         {currentPage === "study" && studyPlan && (
-          <StudySession studyPlan={studyPlan} onComplete={handleStudyComplete} />
+          <StudySession
+            studyPlan={studyPlan}
+            userId={currentUser.id}
+            onComplete={handleStudyComplete}
+          />
         )}
 
-        {currentPage === "progress" && <ProgressTracking userName={currentUser.username} />}
+        {currentPage === "progress" && (
+          <ProgressTracking
+            userName={currentUser.username}
+            userId={currentUser.id}
+          />
+        )}
 
         {currentPage === "calendar" && (
           <Calendar

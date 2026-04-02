@@ -22,7 +22,7 @@ function getGreeting() {
   return 'Good evening';
 }
 
-export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps) {
+export function Dashboard({ user, onStartRecording }: DashboardProps) {
   const [todayProgress, setTodayProgress] = useState<TodayProgress>({
     completedMinutes: 0,
     plannedMinutes: 0,
@@ -142,7 +142,7 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
 
         <div>
           <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-gray-600">Daily progress (sum of today’s plans)</span>
+            <span className="text-gray-600">Daily progress</span>
             <span className="font-medium text-gray-900">{Math.round(progressPercent)}%</span>
           </div>
 
@@ -156,7 +156,7 @@ export function Dashboard({ user, onStartRecording, studyPlan }: DashboardProps)
           <p className="text-xs text-gray-500 mt-2">
             {todayProgress.plannedMinutes > 0
               ? `Goal: ${todayProgress.plannedMinutes} min • Remaining: ${remaining} min`
-              : `No goal set yet today (generate a plan to start tracking).`}
+              : `No goal set yet today.`}
           </p>
         </div>
       </div>
