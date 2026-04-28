@@ -5,7 +5,7 @@ import { MuseClient } from "muse-js";
 import type { SubscriptionLike } from "rxjs";
 import { EEGWaveform } from "./EEGWaveform";
 import { supabase } from "../library/supabase";
-import { generateRuleBasedPlan } from "../library/rulebasedstudy";
+import { generateRuleBasedPlan } from "../library/rulebasedmodel";
 
 type EEGRecordingProps = {
   onComplete: (studyPlan: StudyPlan) => void;
@@ -27,7 +27,7 @@ type RecordingStage = "eyesClosed" | "studying";
 
 // Restore these when you’re done testing
 const EYES_CLOSED_DURATION = 10;
-const STUDYING_DURATION = 5 * 0;
+const STUDYING_DURATION = 0 * 60;
 const RECORDING_DURATION = EYES_CLOSED_DURATION + STUDYING_DURATION;
 
 const MAX_POINTS = 512;
@@ -470,7 +470,7 @@ export function EEGRecording({ onComplete, userName }: EEGRecordingProps) {
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
             {!isRecording && !isAnalysing && "Ready to Record"}
             {isRecording && "Recording in Progress..."}
-            {isAnalysing && "Analyzing and Processing EEG..."}
+            {isAnalysing && "Analysing and Processing EEG..."}
           </h2>
 
           {isRecording && stageBanner && (

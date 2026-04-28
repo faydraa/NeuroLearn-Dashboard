@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 
+// Types of Performance Indicators Stored into Supabase
 export type StudySessionRow = {
   user_id: string;
   session_label?: string | null;
@@ -15,9 +16,9 @@ export type StudySessionRow = {
   focus_band?: string | null;
 };
 
+// Retrieve Data from StudySession.tsx
 export async function addStudySession(session: StudySessionRow) {
   console.log("addStudySession called with:", session);
-
   const { data, error } = await supabase
     .from("study_sessions")
     .insert([session])
@@ -26,11 +27,11 @@ export async function addStudySession(session: StudySessionRow) {
 
   console.log("insert data =", data);
   console.log("insert error =", error);
-
   if (error) throw error;
   return data;
 }
 
+// Retrieve Data from Daily Study Session
 export async function getTodayStudySessions(userId: string, today: string) {
   const { data, error } = await supabase
     .from("study_sessions")
@@ -43,6 +44,7 @@ export async function getTodayStudySessions(userId: string, today: string) {
   return data || [];
 }
 
+// Retrieved Data from Monthly Study Sessions
 export async function getMonthStudySessions(
   userId: string,
   startDate: string,

@@ -27,7 +27,7 @@ export function Sidebar({ currentPage, onNavigate, onLogout, user }: SidebarProp
           </div>
           <div>
             <h2 className="font-bold text-gray-900">NeuroLearn</h2>
-            <p className="text-xs text-gray-500">EEG Learning</p>
+            <p className="text-xs text-gray-500">EEG-Based Learning</p>
           </div>
         </div>
       </div>

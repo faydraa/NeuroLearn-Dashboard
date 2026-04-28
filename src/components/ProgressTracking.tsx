@@ -157,6 +157,22 @@ export function ProgressTracking({ userName, userId }: ProgressTrackingProps) {
       "2026-04-10": { date: "2026-04-10", duration: 95, sessions: 1, avgFocus: 71 },
       "2026-04-11": { date: "2026-04-11", duration: 110, sessions: 2, avgFocus: 79 },
       "2026-04-12": { date: "2026-04-12", duration: 80, sessions: 1, avgFocus: 66 },
+      "2026-04-13": { date: "2026-04-13", duration: 125, sessions: 2, avgFocus: 77 },
+      "2026-04-14": { date: "2026-04-14", duration: 50, sessions: 1, avgFocus: 62 },
+      "2026-04-15": { date: "2026-04-15", duration: 180, sessions: 3, avgFocus: 81 },
+      "2026-04-16": { date: "2026-04-16", duration: 95, sessions: 1, avgFocus: 70 },
+      "2026-04-17": { date: "2026-04-17", duration: 140, sessions: 2, avgFocus: 75 },
+      "2026-04-18": { date: "2026-04-18", duration: 65, sessions: 1, avgFocus: 68 },
+      "2026-04-19": { date: "2026-04-19", duration: 220, sessions: 3, avgFocus: 84 },
+      "2026-04-20": { date: "2026-04-20", duration: 85, sessions: 1, avgFocus: 73 },
+      "2026-04-21": { date: "2026-04-21", duration: 160, sessions: 2, avgFocus: 78 },
+      "2026-04-22": { date: "2026-04-22", duration: 40, sessions: 1, avgFocus: 59 },
+      "2026-04-23": { date: "2026-04-23", duration: 130, sessions: 2, avgFocus: 76 },
+      "2026-04-24": { date: "2026-04-24", duration: 105, sessions: 2, avgFocus: 74 },
+      "2026-04-25": { date: "2026-04-25", duration: 190, sessions: 3, avgFocus: 83 },
+      "2026-04-26": { date: "2026-04-26", duration: 70, sessions: 1, avgFocus: 65 },
+      "2026-04-27": { date: "2026-04-27", duration: 155, sessions: 2, avgFocus: 80 },
+      "2026-04-28": { date: "2026-04-28", duration: 115, sessions: 2, avgFocus: 78 },
     };
 
     setProgressMap(mockProgress);
@@ -353,7 +369,7 @@ export function ProgressTracking({ userName, userId }: ProgressTrackingProps) {
                 <Brain className="w-8 h-8 opacity-80" />
                 <TrendingUp className="w-5 h-5 opacity-80" />
               </div>
-              <p className="text-blue-100 text-sm mb-1">Baseline Attention Score</p>
+              <p className="text-blue-100 text-sm mb-1">Baseline Focus Score</p>
               <p className="text-3xl font-bold">{selectedSession?.baselineAttention ?? 0}</p>
             </div>
 
@@ -362,7 +378,7 @@ export function ProgressTracking({ userName, userId }: ProgressTrackingProps) {
                 <BookOpen className="w-8 h-8 opacity-80" />
                 <TrendingUp className="w-5 h-5 opacity-80" />
               </div>
-              <p className="text-purple-100 text-sm mb-1">Study Session Attention Score</p>
+              <p className="text-purple-100 text-sm mb-1">Study Session Focus Score</p>
               <p className="text-3xl font-bold">{selectedSession?.sessionAttention ?? 0}</p>
             </div>
 

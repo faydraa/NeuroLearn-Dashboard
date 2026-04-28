@@ -47,6 +47,7 @@ export function Dashboard({ user, onStartRecording }: DashboardProps) {
       '2026-04-10': { completedMinutes: 95, plannedMinutes: 95, sessions: 1, avgFocus: 71 },
       '2026-04-11': { completedMinutes: 110, plannedMinutes: 110, sessions: 2, avgFocus: 79 },
       '2026-04-12': { completedMinutes: 80, plannedMinutes: 80, sessions: 1, avgFocus: 66 },
+      '2026-04-28': { completedMinutes: 47, plannedMinutes: 60, sessions: 2, avgFocus: 78 },
     };
 
     const today = mockProgress[todayKey];
