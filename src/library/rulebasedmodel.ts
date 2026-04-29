@@ -28,8 +28,7 @@ function bandProfile(band: FocusBand): { studyMin: number; breakFrequency: numbe
 
 // Get break duration based on break type and focus band
 function getBreakDuration(breakType: string, focusBand: FocusBand): number {
-  // Remove emoji prefix for duration calculation
-  const type = breakType.replace(/[🔥🏊💧]\s/, '').toLowerCase();
+  const type = breakType.toLowerCase();
   
   let baseDuration = 0;
   
@@ -66,10 +65,10 @@ function getBreakDuration(breakType: string, focusBand: FocusBand): number {
   return baseDuration + extraDuration;
 }
 
-// Get break type in specific order: Breathing -> Water -> Stretch (with emojis)
-function getRandomBreakType(breakIndex: number): string {
-  // Define the desired order of breaks with emojis
-  const orderedBreaks = ["🔥 Breathing break", "🏊 Water break", "💧 Stretch break"];
+// Get break type in specific order: Breathing -> Water -> Stretch (no emojis)
+function getOrderedBreakType(breakIndex: number): string {
+  // Define the desired order of breaks
+  const orderedBreaks = ["Breathing break", "Water break", "Stretch break"];
   
   // Get the current position in the cycle
   const position = breakIndex % orderedBreaks.length;
@@ -119,7 +118,7 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
     
     if (needsBreak && remainingAfterStudy >= 2) {
       // Use the ordered break type based on breakIndex
-      const breakType = getRandomBreakType(breakIndex);
+      const breakType = getOrderedBreakType(breakIndex);
       
       let breakDuration = getBreakDuration(breakType, focusBand);
       
