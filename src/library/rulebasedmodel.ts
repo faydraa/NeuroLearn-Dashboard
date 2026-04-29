@@ -26,9 +26,10 @@ function bandProfile(band: FocusBand): { studyMin: number; breakFrequency: numbe
   }
 }
 
-// Get random break duration based on break type and focus band
+// Get break duration based on break type and focus band
 function getBreakDuration(breakType: string, focusBand: FocusBand): number {
-  const type = breakType.toLowerCase();
+  // Remove emoji prefix for duration calculation
+  const type = breakType.replace(/[🔥🏊💧]\s/, '').toLowerCase();
   
   let baseDuration = 0;
   
@@ -65,25 +66,15 @@ function getBreakDuration(breakType: string, focusBand: FocusBand): number {
   return baseDuration + extraDuration;
 }
 
-// Get random break type with variety
-function getRandomBreakType(previousTypes: string[], focusBand: FocusBand): string {
-  let allTypes: string[];
+// Get break type in specific order: Breathing -> Water -> Stretch (with emojis)
+function getRandomBreakType(breakIndex: number): string {
+  // Define the desired order of breaks with emojis
+  const orderedBreaks = ["🔥 Breathing break", "🏊 Water break", "💧 Stretch break"];
   
-  if (focusBand === "strong_focus" || focusBand === "moderate_focus") {
-    allTypes = ["Water break", "Stretch break", "Breathing break"];
-  } else {
-    allTypes = ["Water break", "Stretch break", "Breathing break", "Snack break", "Meditation break", "Eye rest break"];
-  }
+  // Get the current position in the cycle
+  const position = breakIndex % orderedBreaks.length;
   
-  const lastType = previousTypes[previousTypes.length - 1];
-  let availableTypes = allTypes;
-  
-  if (lastType) {
-    availableTypes = allTypes.filter(t => t !== lastType);
-  }
-  
-  const randomIndex = Math.floor(Math.random() * availableTypes.length);
-  return availableTypes[randomIndex];
+  return orderedBreaks[position];
 }
 
 export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
@@ -92,7 +83,7 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
 
   let t = 0; // Total elapsed time (includes both study AND breaks)
   const breaks: { time: number; duration: number; type: string }[] = [];
-  const breakTypesUsed: string[] = [];
+  let breakIndex = 0; // Track the number of breaks added
 
   // Loop until we reach the target total duration (including breaks)
   while (t < targetTotalMin) {
@@ -127,8 +118,8 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
                       (breaksSoFar < minBreaks && remainingAfterStudy > 0);
     
     if (needsBreak && remainingAfterStudy >= 2) {
-      const breakType = getRandomBreakType(breakTypesUsed, focusBand);
-      breakTypesUsed.push(breakType);
+      // Use the ordered break type based on breakIndex
+      const breakType = getRandomBreakType(breakIndex);
       
       let breakDuration = getBreakDuration(breakType, focusBand);
       
@@ -142,6 +133,7 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
           type: breakType,
         });
         t += breakDuration;
+        breakIndex++; // Increment break index after adding a break
       }
     }
   }
@@ -150,7 +142,7 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
   const finalTotalDuration = t;
 
   return {
-    totalDuration: finalTotalDuration, // This will now exactly equal targetTotalMin
+    totalDuration: finalTotalDuration,
     breaks,
     subjects: [],
     generatedAt: new Date(),
