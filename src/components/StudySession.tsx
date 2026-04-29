@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Play, Pause, Square, Coffee, Brain, Apple, CheckCircle } from "lucide-react";
+import { Play, Pause, Square, Coffee, Brain, Apple, CheckCircle, Activity } from "lucide-react";
 import type { StudyPlan } from "../App";
 import { supabase } from "../library/supabase";
+import { MuseClient } from "muse-js";
+import type { SubscriptionLike } from "rxjs";
 
 type StudySessionProps = {
   studyPlan: StudyPlan;
@@ -77,14 +79,52 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
   const [isRunning, setIsRunning] = useState(false);
   const [notification, setNotification] = useState<Notification | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Bluetooth State
+  const [museConnected, setMuseConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
-  const focusPercent = Math.round((studyPlan.baseline_mean_focus ?? 0.68) * 100);
-  const focusBandLabel = (studyPlan.focusBand ?? "moderate_focus").replaceAll("_", " ");
+  const eegSubRef = useRef<SubscriptionLike | null>(null);
+  const accSubRef = useRef<SubscriptionLike | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const startedAtRef = useRef<string | null>(null);
   const hasFinishedRef = useRef(false);
 
+  // Connect to Muse Device
+  const connectMuse = async () => {
+    if (!("bluetooth" in navigator)) {
+      alert("Web Bluetooth is not supported on this browser. Please use Chrome or Microsoft Edge (desktop) over HTTPS.");
+      return;
+    }
+
+    setIsConnecting(true);
+
+    try {
+      const client = new MuseClient();
+      await client.connect(); // Trigger Bluetooth Window Pop-up
+      await client.start(); // Begin Streaming of Raw EEG Signals
+
+      // We don't need to do anything with the data, just need the connection
+      const accSub = client.accelerometerData.subscribe(() => {});
+      const sub = client.eegReadings.subscribe(() => {});
+
+      eegSubRef.current?.unsubscribe();
+      accSubRef.current?.unsubscribe();
+
+      eegSubRef.current = sub;
+      accSubRef.current = accSub;
+
+      setMuseConnected(true);
+      alert("Muse connected! You can now start your study session.");
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Cleanup on unmount
   useEffect(() => {
     audioRef.current = new Audio(
       "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGH0fPTgjMGHm7A7+OZSA0PVqzn77BdGAg+ltrzxnMpBSl+zPLaizsIGGS57OihUhELTKXh8bllHAU2jdXzzn0vBSF1yPDbkUELElyx6OyrWBUIQ5zd8sFuJAU0iNHz0YI0Bh1rv+7mnEsMEFOq5O+zYBoGPJPY88p2KwUme8rx3I4+CRZiturqpVQSC0mi4PK8aB8GM4nU8tGAMQYfccLu45ZFDBFYr+fvsF0YCDyU2vPJdSsFJ33L8tqNPQkXY7vq66ZUEgxJo+DyvmwhBjKH0/LPgDEGH27A7+OYRwwRV63n77BdGAg8lNrzyXYrBSh+y/HajD0JF2O76uunVRIMSKPg8r1sIQYyh9Pyz4AxBh9uwO/jmEcMEVWt5++wXRgIPJTa88l2KwUofsvx2ow9CRdju+rrp1USDEij4PK9bCEGMofT8s+AMQYfbsDv45hHDBFVrefvsF0YCDyU2vPJdisFK"
@@ -92,6 +132,8 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
 
     return () => {
       audioRef.current = null;
+      eegSubRef.current?.unsubscribe();
+      accSubRef.current?.unsubscribe();
     };
   }, []);
 
@@ -115,8 +157,7 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
     return [...(studyPlan.breaks ?? [])].sort((a, b) => a.time - b.time);
   }, [studyPlan.breaks]);
 
-  const finalizeSession = useCallback(
-  async (elapsedSeconds: number) => {
+  const finalizeSession = useCallback(async (elapsedSeconds: number) => {
     if (hasFinishedRef.current) return;
     hasFinishedRef.current = true;
 
@@ -150,14 +191,11 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
 
       console.log("Saving study session payload:", payload);
 
-      const { data, error } = await supabase
+      const {  error } = await supabase
         .from("study_sessions")
         .insert([payload])
         .select()
         .single();
-
-      console.log("direct insert data =", data);
-      console.log("direct insert error =", error);
 
       if (error) throw error;
 
@@ -168,9 +206,7 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
       hasFinishedRef.current = false;
       setIsSaving(false);
     }
-  },
-  [studyPlan, userId, onComplete]
-);
+  }, [studyPlan, userId, onComplete]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -231,10 +267,24 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
   const totalSeconds = studyPlan.totalDuration * 60;
   const progressPercent = totalSeconds > 0 ? (timeElapsed / totalSeconds) * 100 : 0;
 
-  const focusColor =
-    focusPercent > 70 ? "text-green-600" : focusPercent > 50 ? "text-amber-600" : "text-red-600";
-  const focusBarColor =
-    focusPercent > 70 ? "bg-green-500" : focusPercent > 50 ? "bg-amber-500" : "bg-red-500";
+  const focusPercent = Math.round((studyPlan.baseline_mean_focus ?? 0.68) * 100);
+  const focusBandLabel = (studyPlan.focusBand ?? "moderate_focus").replaceAll("_", " ");
+  const focusColor = focusPercent > 70 ? "text-green-600" : focusPercent > 50 ? "text-amber-600" : "text-red-600";
+  const focusBarColor = focusPercent > 70 ? "bg-green-500" : focusPercent > 50 ? "bg-amber-500" : "bg-red-500";
+
+  // Check if Muse needs to be connected before starting
+  const handleStartSession = () => {
+    if (!museConnected) {
+      alert("Please connect your Muse headset first!");
+      return;
+    }
+    
+    if (timeElapsed === 0 && !startedAtRef.current) {
+      startedAtRef.current = new Date().toISOString();
+      hasFinishedRef.current = false;
+    }
+    setIsRunning(true);
+  };
 
   return (
     <div className="max-w-6xl mx-auto p-8">
@@ -284,38 +334,45 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
             </div>
 
             <div className="flex items-center justify-center gap-4">
-              {!isRunning ? (
+              {!museConnected ? (
                 <button
-                  onClick={() => {
-                    if (timeElapsed === 0 && !startedAtRef.current) {
-                      startedAtRef.current = new Date().toISOString();
-                      hasFinishedRef.current = false;
-                    }
-                    setIsRunning(true);
-                  }}
-                  className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition"
+                  onClick={connectMuse}
+                  disabled={isConnecting}
+                  className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition disabled:opacity-50"
                 >
-                  <Play className="w-5 h-5" />
-                  {timeElapsed === 0 ? "Start Session" : "Resume"}
+                  <Activity className="w-5 h-5" />
+                  {isConnecting ? "Connecting..." : "Connect Headset to Start"}
                 </button>
               ) : (
-                <button
-                  onClick={() => setIsRunning(false)}
-                  className="flex items-center gap-2 bg-amber-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-amber-700 transition"
-                >
-                  <Pause className="w-5 h-5" />
-                  Pause
-                </button>
-              )}
+                <>
+                  {!isRunning ? (
+                    <button
+                      onClick={handleStartSession}
+                      className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition"
+                    >
+                      <Play className="w-5 h-5" />
+                      {timeElapsed === 0 ? "Start Session" : "Resume"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setIsRunning(false)}
+                      className="flex items-center gap-2 bg-amber-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-amber-700 transition"
+                    >
+                      <Pause className="w-5 h-5" />
+                      Pause
+                    </button>
+                  )}
 
-              <button
-                onClick={() => void finalizeSession(timeElapsed)}
-                disabled={isSaving}
-                className="flex items-center gap-2 bg-gray-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-gray-700 transition disabled:opacity-50"
-              >
-                <Square className="w-5 h-5" />
-                End Session
-              </button>
+                  <button
+                    onClick={() => void finalizeSession(timeElapsed)}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 bg-gray-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-gray-700 transition disabled:opacity-50"
+                  >
+                    <Square className="w-5 h-5" />
+                    End Session
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
