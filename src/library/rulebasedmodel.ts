@@ -93,8 +93,6 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
   let t = 0; // Total elapsed time (includes both study AND breaks)
   const breaks: { time: number; duration: number; type: string }[] = [];
   const breakTypesUsed: string[] = [];
-  let totalStudyTime = 0;
-  let sessionCount = 0;
 
   // Loop until we reach the target total duration (including breaks)
   while (t < targetTotalMin) {
@@ -106,8 +104,6 @@ export function generateRuleBasedPlan(baseline_mean_focus: number): StudyPlan {
     
     // Add study session
     t += actualStudyMin;
-    totalStudyTime += actualStudyMin;
-    sessionCount++;
     
     // Check if we've reached the target after study session
     if (t >= targetTotalMin) break;
