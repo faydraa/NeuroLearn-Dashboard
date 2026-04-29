@@ -341,7 +341,7 @@ export function StudySession({ studyPlan, userId, onComplete }: StudySessionProp
                   className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition disabled:opacity-50"
                 >
                   <Activity className="w-5 h-5" />
-                  {isConnecting ? "Connecting..." : "Connect Headset to Start"}
+                  {isConnecting ? "Connecting..." : "Connect Headband to Start"}
                 </button>
               ) : (
                 <>
